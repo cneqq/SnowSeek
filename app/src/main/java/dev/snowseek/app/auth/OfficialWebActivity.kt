@@ -21,6 +21,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.Lifecycle
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -123,6 +124,8 @@ class OfficialWebActivity : ComponentActivity() {
         settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
+            useWideViewPort = true
+            loadWithOverviewMode = true
             allowFileAccess = false
             allowContentAccess = false
             mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
@@ -201,7 +204,7 @@ class OfficialWebActivity : ComponentActivity() {
         startPage(this, savedWebState)
     }
 
-    private fun startPage(view: WebView, stateToRestore: Bundle? = null, url: String = OFFICIAL_URL) {
+    private fun startPage(view: WebView, stateToRestore: Bundle? = null, url: String = SIGN_IN_URL) {
         lifecycleScope.launch(start = CoroutineStart.UNDISPATCHED) {
             try {
                 val revision = WebSession.awaitReady()
@@ -209,6 +212,7 @@ class OfficialWebActivity : ComponentActivity() {
                 // These operations run consecutively on Main: a new logout cannot interleave.
                 WebSession.attach(view)
                 loadedRevision = revision
+                blankCheck?.cancel()
                 error = null
                 loading = true
                 val restore = stateToRestore?.takeIf { savedWebRevision == revision }
@@ -248,7 +252,7 @@ class OfficialWebActivity : ComponentActivity() {
         if (clearing || connecting || sessionCleared) return
         webView?.let { view ->
             view.settings.cacheMode = WebSettings.LOAD_NO_CACHE
-            val url = view.url?.takeIf { WebNavigationPolicy.classify(it) == NavigationDecision.INTERNAL } ?: OFFICIAL_URL
+            val url = view.url?.takeIf { WebNavigationPolicy.classify(it) == NavigationDecision.INTERNAL } ?: SIGN_IN_URL
             startPage(view, url = url)
         }
     }
@@ -258,8 +262,15 @@ class OfficialWebActivity : ComponentActivity() {
         blankCheck?.cancel()
         if (finishedUrl?.toUri()?.host != "chat.deepseek.com") return
         blankCheck = lifecycleScope.launch {
-            repeat(3) {
+            var emptyChecks = 0
+            // Cookie consent can render before the login app. Keep watching until a form appears,
+            // including after the user dismisses the consent banner.
+            while (true) {
                 delay(3_000)
+                if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+                    emptyChecks = 0
+                    continue
+                }
                 // The SPA can replace / with /sign_in without a new document navigation.
                 if (webView !== view || view.url?.toUri()?.host != "chat.deepseek.com" || sessionCleared || clearing || error != null) return@launch
                 val raw = withTimeoutOrNull(2_000) { suspendCancellableCoroutine<String> { continuation ->
@@ -270,7 +281,11 @@ class OfficialWebActivity : ComponentActivity() {
                               const r=e.getBoundingClientRect(); const s=getComputedStyle(e);
                               return r.width>1 && r.height>1 && s.visibility!=='hidden' && s.display!=='none'; }));
                           const nav=performance.getEntriesByType('navigation')[0];
+                          const form=body && Array.from(body.querySelectorAll('input:not([type=hidden]),textarea,[contenteditable=true]')).some(e => {
+                            const r=e.getBoundingClientRect(); const s=getComputedStyle(e);
+                            return r.width>1 && r.height>1 && s.visibility!=='hidden' && s.display!=='none'; });
                           return JSON.stringify({visible:!!visible,width:innerWidth,height:innerHeight,
+                            form:!!form,
                             status:nav && typeof nav.responseStatus==='number' ? nav.responseStatus : 0}); })();
                     """.trimIndent()) { value -> if (continuation.isActive) continuation.resume(value) }
                 } } ?: "null"
@@ -278,8 +293,13 @@ class OfficialWebActivity : ComponentActivity() {
                     val inner = Json.parseToJsonElement(raw).jsonPrimitive.content
                     Json.parseToJsonElement(inner).jsonObject
                 } catch (_: Exception) { null }
-                if ((probe?.get("visible") as? JsonPrimitive)?.booleanOrNull == true) return@launch
-                if (it == 2) {
+                if ((probe?.get("form") as? JsonPrimitive)?.booleanOrNull == true) return@launch
+                if ((probe?.get("visible") as? JsonPrimitive)?.booleanOrNull == true) {
+                    emptyChecks = 0
+                    continue
+                }
+                emptyChecks++
+                if (emptyChecks >= 3) {
                     val status = (probe?.get("status") as? JsonPrimitive)?.intOrNull?.takeIf { code -> code > 0 }
                     val webVersion = WebView.getCurrentWebViewPackage()?.versionName ?: "unknown"
                     val viewport = "${view.width}×${view.height}"
@@ -287,6 +307,7 @@ class OfficialWebActivity : ComponentActivity() {
                         "DeepSeek не отобразил страницу в WebView. Нажмите обновление. Если в браузере сайт работает, проверьте обновление Android System WebView/Chrome.",
                         "DeepSeek did not render in WebView. Tap reload. If it works in your browser, check Android System WebView/Chrome updates.",
                     ) + "\nWebView $webVersion · ${status?.let { code -> "HTTP $code · " } ?: ""}$viewport · JS $scriptErrors · resources $resourceErrors"
+                    return@launch
                 }
             }
         }
@@ -328,7 +349,12 @@ class OfficialWebActivity : ComponentActivity() {
                 if (!official() || sessionCleared || WebSession.awaitReady() != revision) throw DeepSeekFailure("Страница входа изменилась. Повторите вход. / Sign-in page changed; retry.")
                 val token = (Json.parseToJsonElement(result) as? JsonPrimitive)?.contentOrNull
                     ?.takeIf { it.isNotBlank() && it != "null" && it.length < 16_384 }
-                    ?: throw DeepSeekFailure("Сначала завершите вход и CAPTCHA на сайте. / Complete website sign-in and CAPTCHA first.")
+                if (token == null) {
+                    // A missing session does not prove a CAPTCHA was presented. Open the actual
+                    // sign-in route instead of reporting a protection challenge that may not exist.
+                    startPage(view, url = SIGN_IN_URL)
+                    return@launch
+                }
                 // Prove native HTTP compatibility before persisting or reporting a connected account.
                 DeepSeekHttpTransport(applicationContext, token).request("/api/v0/users/current")
                 if (sessionCleared || !official() || WebSession.awaitReady() != revision) throw DeepSeekFailure("Вход был отменён. / Sign-in was cancelled.")
@@ -395,6 +421,9 @@ class OfficialWebActivity : ComponentActivity() {
                         Text(currentError, color = MaterialTheme.colorScheme.error)
                         if (!sessionCleared) {
                             Button(onClick = ::reloadPage, enabled = !clearing && !connecting) { Text(text("Повторить", "Retry")) }
+                            TextButton(onClick = { webView?.let { startPage(it, url = SIGN_IN_URL) } }, enabled = !clearing && !connecting) {
+                                Text(text("Открыть страницу входа", "Open sign-in page"))
+                            }
                         } else {
                             OutlinedButton(onClick = { finish() }) { Text(text("Закрыть", "Close")) }
                         }
@@ -479,6 +508,7 @@ class OfficialWebActivity : ComponentActivity() {
     }
     companion object {
         const val OFFICIAL_URL = "https://chat.deepseek.com/"
+        const val SIGN_IN_URL = "https://chat.deepseek.com/sign_in"
         val HTML_HEADERS = mapOf("Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
         private const val STATE_WEB = "official_web_state"
         private const val STATE_REVISION = "official_web_revision"
