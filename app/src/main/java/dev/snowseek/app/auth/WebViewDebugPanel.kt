@@ -40,7 +40,7 @@ import androidx.compose.ui.window.DialogProperties
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun WebViewDebugPanel(log: WebViewDebugLog, russian: Boolean, onDismiss: () -> Unit) {
+fun WebViewDebugPanel(log: WebViewDebugLog, russian: Boolean, onDismiss: () -> Unit, onDomSnapshot: () -> Unit) {
     fun label(ru: String, en: String) = if (russian) ru else en
     val snapshot by log.state.collectAsState()
     var selected by remember { mutableIntStateOf(0) }
@@ -76,7 +76,13 @@ fun WebViewDebugPanel(log: WebViewDebugLog, russian: Boolean, onDismiss: () -> U
                     }
                 }
                 val tab = tabs[selected]
+                if (tab == WebDebugTab.WebView) {
+                    TextButton(onClick = onDomSnapshot) { Text(label("Снимок DOM сейчас", "Capture DOM now")) }
+                }
                 if (tab == WebDebugTab.Network) {
+                    val network = snapshot.entries.filter { it.tab == WebDebugTab.Network }
+                    Text("HTTP_ERROR: ${network.count { it.message.startsWith("HTTP_ERROR") }} · REQUEST_ERROR: ${network.count { it.message.startsWith("REQUEST_ERROR") }} · TLS_ERROR: ${network.count { it.message.startsWith("TLS_ERROR") }} · DOM RESOURCE_ERROR: ${network.count { it.message.startsWith("RESOURCE_ERROR") }}",
+                        Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelSmall)
                     Text(label("Только callbacks WebView. HTTP ? — статус неизвестен. Успешные ответы, тела, заголовки и полная цепочка редиректов недоступны.",
                         "WebView callbacks only. HTTP ? = unknown status. Successful responses, bodies, headers and complete redirect chains are unavailable."),
                         Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)

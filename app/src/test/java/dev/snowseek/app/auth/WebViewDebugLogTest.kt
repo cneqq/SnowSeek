@@ -6,6 +6,17 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class WebViewDebugLogTest {
+    @Test fun longJavascriptErrorsKeepLastStackFrameWithoutLeakingSecrets() {
+        val log = WebViewDebugLog(true)
+        val message = "TypeError: " + (1..300).joinToString("\n") { "at render$it (https://chat.deepseek.com/static/app.js:$it:2)" } +
+            "\npassword=private-password\nLAST_STACK_FRAME"
+        log.console("ERROR", message, "https://chat.deepseek.com/static/app.js", 7)
+        val exported = log.export()
+        assertTrue("Final stack frames must not silently disappear", exported.contains("LAST_STACK_FRAME"))
+        assertFalse(exported.contains("private-password"))
+        assertTrue(log.state.value.entries.all { it.message.length <= 4_000 })
+    }
+
     @Test fun urlKeepsResourcePathButRemovesCredentialsQueryValuesAndFragment() {
         val raw = "https://fake-user:fake-password@chat.deepseek.com/static/app.js?code=fake-code&next=%2Fprivate#fake-fragment"
         val safe = DebugRedactor.url(raw)

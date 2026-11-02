@@ -29,7 +29,7 @@ data class WebDebugState(
 class WebViewDebugLog(
     private val enabled: Boolean,
     private val maxEntries: Int = 600,
-    private val maxCharacters: Int = 180_000,
+    private val maxCharacters: Int = 256_000,
 ) {
     private val mutableState = MutableStateFlow(WebDebugState())
     val state = mutableState.asStateFlow()
@@ -73,7 +73,17 @@ class WebViewDebugLog(
     }
 
     fun console(level: String, message: String, source: String?, line: Int) {
-        add(WebDebugTab.Console, "$level $message\n  at ${DebugRedactor.url(source)} · line $line")
+        detailed(WebDebugTab.Console, "$level $message\n  at ${DebugRedactor.url(source)} · line $line")
+    }
+
+    @Synchronized fun detailed(tab: WebDebugTab, message: String) {
+        if (!enabled) return
+        val safe = DebugRedactor.text(message, limit = 65_536)
+        val chunks = safe.chunked(3_500)
+        val group = sequence + 1
+        chunks.forEachIndexed { index, chunk ->
+            add(tab, if (chunks.size == 1) chunk else "DETAIL $group [${index + 1}/${chunks.size}]\n$chunk")
+        }
     }
 
     @Synchronized fun clear() {
@@ -130,8 +140,8 @@ object DebugRedactor {
         } catch (_: Exception) { "[invalid/redacted URL]" }
     }
 
-    fun text(raw: String): String {
-        var value = raw.take(12_000)
+    fun text(raw: String, limit: Int = 4_000): String {
+        var value = raw.take(limit * 3)
         value = urls.replace(value) { url(it.value) }
         value = dataUrls.replace(value, "data:$HIDDEN")
         value = bearer.replace(value, "Bearer $HIDDEN")
@@ -142,6 +152,6 @@ object DebugRedactor {
         value = opaque.replace(value, HIDDEN)
         // A console line cannot forge new log entries via control characters.
         value = value.map { if (it < ' ' && it !in listOf('\n', '\t')) ' ' else it }.joinToString("")
-        return value.take(4_000) + if (value.length > 4_000 || raw.length > 12_000) " [truncated]" else ""
+        return value.take(limit) + if (value.length > limit || raw.length > limit * 3) " [truncated at $limit characters]" else ""
     }
 }

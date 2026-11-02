@@ -95,6 +95,7 @@ class OfficialWebActivity : ComponentActivity() {
     private var scriptErrors = 0
     private var resourceErrors = 0
     private val diagnostics = WebViewDebugLog(enabled = BuildConfig.DEBUG)
+    private val domDiagnostics = WebViewDomDiagnostics(this, diagnostics)
     private var showDiagnostics by mutableStateOf(false)
     private val russian get() = intent.getStringExtra("language") != "en"
     private fun text(ru: String, en: String) = if (russian) ru else en
@@ -170,6 +171,7 @@ class OfficialWebActivity : ComponentActivity() {
             }
 
             override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
+                domDiagnostics.pageStarted(view)
                 diagnostics.location(url, 0)
                 diagnostics.add(WebDebugTab.WebView, "PAGE_STARTED ${DebugRedactor.url(url)}")
                 if (url != null && WebNavigationPolicy.classify(url) != NavigationDecision.INTERNAL) {
@@ -192,10 +194,12 @@ class OfficialWebActivity : ComponentActivity() {
                 // Persist WebView's own cookies without exposing their values to the app.
                 CookieManager.getInstance().flush()
                 checkPageContent(view, url)
+                domDiagnostics.pageReady()
             }
 
             override fun onPageCommitVisible(view: WebView, url: String?) {
                 diagnostics.add(WebDebugTab.WebView, "PAGE_COMMIT_VISIBLE ${DebugRedactor.url(url)}")
+                domDiagnostics.pageReady()
             }
 
             override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
@@ -208,8 +212,8 @@ class OfficialWebActivity : ComponentActivity() {
             }
 
             override fun onReceivedError(view: WebView, request: WebResourceRequest, failure: WebResourceError) {
-                diagnostics.add(WebDebugTab.Network, "REQUEST_ERROR ${failure.errorCode} ${failure.description} · ${request.method} " +
-                    "${DebugRedactor.url(request.url.toString())} · main=${request.isForMainFrame}")
+                diagnostics.add(WebDebugTab.Network, "REQUEST_ERROR nativeCode=${failure.errorCode} ${failure.description} · ${request.method} " +
+                    "${DebugRedactor.url(request.url.toString())} · main=${request.isForMainFrame} · HTTP ? (not exposed by onReceivedError)")
                 if (request.isForMainFrame) showLoadError() else resourceErrors++
             }
 
@@ -239,6 +243,7 @@ class OfficialWebActivity : ComponentActivity() {
             }
         }
         webView = this
+        domDiagnostics.attach(this)
         startPage(this, savedWebState)
     }
 
@@ -492,7 +497,7 @@ class OfficialWebActivity : ComponentActivity() {
             }
         }
         if (BuildConfig.DEBUG && showDiagnostics) {
-            WebViewDebugPanel(diagnostics, russian, onDismiss = { showDiagnostics = false })
+            WebViewDebugPanel(diagnostics, russian, onDismiss = { showDiagnostics = false }, onDomSnapshot = { domDiagnostics.capture() })
         }
         externalUrl?.let { target ->
             AlertDialog(
@@ -549,6 +554,7 @@ class OfficialWebActivity : ComponentActivity() {
     private fun releaseWebView(view: WebView) {
         if (webView !== view) return
         WebSession.detach(view)
+        domDiagnostics.close()
         webView = null
         view.stopLoading()
         (view.parent as? android.view.ViewGroup)?.removeView(view)
