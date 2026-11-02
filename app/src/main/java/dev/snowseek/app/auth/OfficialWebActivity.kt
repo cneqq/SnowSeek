@@ -88,7 +88,6 @@ class OfficialWebActivity : ComponentActivity() {
     private var clearing by mutableStateOf(false)
     private var connecting by mutableStateOf(false)
     private var sessionCleared by mutableStateOf(false)
-    private var pageReady by mutableStateOf(false)
     private var blankCheck: Job? = null
     private var scriptErrors = 0
     private var resourceErrors = 0
@@ -160,7 +159,6 @@ class OfficialWebActivity : ComponentActivity() {
                 }
                 error = null
                 loading = true
-                pageReady = false
                 scriptErrors = 0
                 resourceErrors = 0
                 blankCheck?.cancel()
@@ -240,7 +238,6 @@ class OfficialWebActivity : ComponentActivity() {
     }
     private fun showLoadError() {
         loading = false
-        pageReady = false
         error = text(
             "Страница не загрузилась. Проверьте сеть и повторите попытку. Для входа также можно открыть браузер.",
             "The page could not load. Check your connection and retry, or use your browser to sign in.",
@@ -263,7 +260,8 @@ class OfficialWebActivity : ComponentActivity() {
         blankCheck = lifecycleScope.launch {
             repeat(3) {
                 delay(3_000)
-                if (webView !== view || view.url != finishedUrl || sessionCleared || clearing || error != null) return@launch
+                // The SPA can replace / with /sign_in without a new document navigation.
+                if (webView !== view || view.url?.toUri()?.host != "chat.deepseek.com" || sessionCleared || clearing || error != null) return@launch
                 val raw = withTimeoutOrNull(2_000) { suspendCancellableCoroutine<String> { continuation ->
                     view.evaluateJavascript("""
                         (() => { const body = document.body;
@@ -280,7 +278,7 @@ class OfficialWebActivity : ComponentActivity() {
                     val inner = Json.parseToJsonElement(raw).jsonPrimitive.content
                     Json.parseToJsonElement(inner).jsonObject
                 } catch (_: Exception) { null }
-                if ((probe?.get("visible") as? JsonPrimitive)?.booleanOrNull == true) { pageReady = true; return@launch }
+                if ((probe?.get("visible") as? JsonPrimitive)?.booleanOrNull == true) return@launch
                 if (it == 2) {
                     val status = (probe?.get("status") as? JsonPrimitive)?.intOrNull?.takeIf { code -> code > 0 }
                     val webVersion = WebView.getCurrentWebViewPackage()?.versionName ?: "unknown"
@@ -289,7 +287,6 @@ class OfficialWebActivity : ComponentActivity() {
                         "DeepSeek не отобразил страницу в WebView. Нажмите обновление. Если в браузере сайт работает, проверьте обновление Android System WebView/Chrome.",
                         "DeepSeek did not render in WebView. Tap reload. If it works in your browser, check Android System WebView/Chrome updates.",
                     ) + "\nWebView $webVersion · ${status?.let { code -> "HTTP $code · " } ?: ""}$viewport · JS $scriptErrors · resources $resourceErrors"
-                    pageReady = false
                 }
             }
         }
@@ -386,7 +383,7 @@ class OfficialWebActivity : ComponentActivity() {
                     TextButton(onClick = { confirmLogout = true }, enabled = !clearing && !sessionCleared && !connecting) {
                         Text(if (clearing) text("Очистка…", "Clearing…") else text("Выйти с сайта", "Sign out of website"))
                     }
-                    Button(onClick = ::connectAccount, enabled = pageReady && !loading && !clearing && !connecting && !sessionCleared) {
+                    Button(onClick = ::connectAccount, enabled = !loading && !clearing && !connecting && !sessionCleared) {
                         Text(if (connecting) text("Проверка…", "Checking…") else text("Подключить SnowSeek", "Connect SnowSeek"))
                     }
                 }
