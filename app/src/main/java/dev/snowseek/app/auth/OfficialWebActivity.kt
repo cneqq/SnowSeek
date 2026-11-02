@@ -103,6 +103,7 @@ class OfficialWebActivity : ComponentActivity() {
         domDiagnostics.capture("height-correction-result")
     }
     private var showDiagnostics by mutableStateOf(false)
+    private var googleOpened = false
     private val russian get() = intent.getStringExtra("language") != "en"
     private fun text(ru: String, en: String) = if (russian) ru else en
 
@@ -156,6 +157,11 @@ class OfficialWebActivity : ComponentActivity() {
         CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
         webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                if (request.isForMainFrame && GoogleWebSignIn.isAuthorizeUrl(request.url.toString()) &&
+                    view.url?.toUri()?.host == GoogleWebSignIn.HOST && !clearing && !sessionCleared) {
+                    openGoogleSignIn(request.url.toString())
+                    return true
+                }
                 val decision = WebNavigationPolicy.classify(request.url.toString())
                 val allowed = WebNavigationPolicy.mayLoadInWebView(request.url.toString(), request.isForMainFrame)
                 diagnostics.add(WebDebugTab.WebView, "NAVIGATION ${request.method} ${DebugRedactor.url(request.url.toString())} · " +
@@ -395,6 +401,13 @@ class OfficialWebActivity : ComponentActivity() {
         }
     }
 
+    private fun openGoogleSignIn(authorizeUrl: String? = null) {
+        googleOpened = true
+        startActivity(Intent(this, GoogleSignInActivity::class.java)
+            .putExtra(GoogleSignInActivity.EXTRA_START_URL, authorizeUrl)
+            .putExtra("language", if (russian) "ru" else "en"))
+    }
+
     private fun connectAccount() {
         if (connecting || clearing || sessionCleared) return
         val view = webView ?: return
@@ -484,6 +497,10 @@ class OfficialWebActivity : ComponentActivity() {
                         Text(if (connecting) text("Проверка…", "Checking…") else text("Подключить SnowSeek", "Connect SnowSeek"))
                     }
                 }
+                TextButton(onClick = { openGoogleSignIn() }, enabled = !clearing && !connecting && !sessionCleared,
+                    modifier = Modifier.padding(horizontal = 16.dp)) {
+                    Text(text("Настроить вход через Google", "Set up Google sign-in"))
+                }
                 if (clearing) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 else if (loading) LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
                 val currentError = error
@@ -561,6 +578,12 @@ class OfficialWebActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         webView?.onResume()
+        if (googleOpened) {
+            googleOpened = false
+            // The official button entered its loading state before handing off. Start a fresh
+            // page on cancellation/setup return, without clearing website cookies or storage.
+            webView?.let { if (!sessionCleared && !clearing) startPage(it, url = SIGN_IN_URL) }
+        }
     }
 
     override fun onPause() {
