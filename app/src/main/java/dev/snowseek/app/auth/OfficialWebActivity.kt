@@ -7,6 +7,7 @@ import android.graphics.Bitmap
 import androidx.core.net.toUri
 import android.net.http.SslError
 import android.os.Bundle
+import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.SslErrorHandler
 import android.webkit.WebChromeClient
@@ -24,6 +25,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.Lifecycle
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -55,6 +57,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.viewinterop.AndroidView
 import java.io.ByteArrayInputStream
 import java.io.IOException
@@ -96,6 +99,9 @@ class OfficialWebActivity : ComponentActivity() {
     private var resourceErrors = 0
     private val diagnostics = WebViewDebugLog(enabled = BuildConfig.DEBUG)
     private val domDiagnostics = WebViewDomDiagnostics(this, diagnostics)
+    private val heightController = WebViewHeightController(this, diagnostics) {
+        domDiagnostics.capture("height-correction-result")
+    }
     private var showDiagnostics by mutableStateOf(false)
     private val russian get() = intent.getStringExtra("language") != "en"
     private fun text(ru: String, en: String) = if (russian) ru else en
@@ -130,6 +136,8 @@ class OfficialWebActivity : ComponentActivity() {
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun createWebView(): WebView = WebView(this).apply {
+        // Give the web viewport a definite Android size independent of document content height.
+        layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         // JavaScript and DOM storage are required by the official website, with no native bridge.
         settings.apply {
             javaScriptEnabled = true
@@ -171,6 +179,7 @@ class OfficialWebActivity : ComponentActivity() {
             }
 
             override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
+                heightController.pageStarted()
                 domDiagnostics.pageStarted(view)
                 diagnostics.location(url, 0)
                 diagnostics.add(WebDebugTab.WebView, "PAGE_STARTED ${DebugRedactor.url(url)}")
@@ -195,16 +204,19 @@ class OfficialWebActivity : ComponentActivity() {
                 CookieManager.getInstance().flush()
                 checkPageContent(view, url)
                 domDiagnostics.pageReady()
+                heightController.check()
             }
 
             override fun onPageCommitVisible(view: WebView, url: String?) {
                 diagnostics.add(WebDebugTab.WebView, "PAGE_COMMIT_VISIBLE ${DebugRedactor.url(url)}")
                 domDiagnostics.pageReady()
+                heightController.check()
             }
 
             override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
                 diagnostics.location(url)
                 diagnostics.add(WebDebugTab.WebView, "HISTORY_UPDATED reload=$isReload ${DebugRedactor.url(url)}")
+                heightController.check("navigation")
             }
 
             override fun onLoadResource(view: WebView, url: String?) {
@@ -244,6 +256,7 @@ class OfficialWebActivity : ComponentActivity() {
         }
         webView = this
         domDiagnostics.attach(this)
+        heightController.attach(this)
         startPage(this, savedWebState)
     }
 
@@ -453,7 +466,7 @@ class OfficialWebActivity : ComponentActivity() {
                 },
             )
         }) { padding ->
-            Column(Modifier.fillMaxSize().padding(padding)) {
+            Column(Modifier.fillMaxSize().padding(padding).onSizeChanged { heightController.composeRoot(it.width, it.height) }) {
                 settingsError?.let { Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error) }
                 Text(
                     text(
@@ -488,16 +501,21 @@ class OfficialWebActivity : ComponentActivity() {
                     }
                 }
                 if (!sessionCleared) {
-                    AndroidView(
-                        factory = { createWebView() },
-                        modifier = Modifier.fillMaxWidth().weight(1f),
-                        onRelease = { releaseWebView(it) },
-                    )
+                    Box(Modifier.fillMaxWidth().weight(1f).onSizeChanged { heightController.composeHost(it.width, it.height) }) {
+                        AndroidView(
+                            factory = { createWebView() },
+                            modifier = Modifier.fillMaxSize(),
+                            onRelease = { releaseWebView(it) },
+                        )
+                    }
                 }
             }
         }
         if (BuildConfig.DEBUG && showDiagnostics) {
-            WebViewDebugPanel(diagnostics, russian, onDismiss = { showDiagnostics = false }, onDomSnapshot = { domDiagnostics.capture() })
+            WebViewDebugPanel(diagnostics, russian, onDismiss = { showDiagnostics = false }, onDomSnapshot = {
+                heightController.check("manual")
+                domDiagnostics.capture()
+            })
         }
         externalUrl?.let { target ->
             AlertDialog(
@@ -555,6 +573,7 @@ class OfficialWebActivity : ComponentActivity() {
         if (webView !== view) return
         WebSession.detach(view)
         domDiagnostics.close()
+        heightController.close()
         webView = null
         view.stopLoading()
         (view.parent as? android.view.ViewGroup)?.removeView(view)
