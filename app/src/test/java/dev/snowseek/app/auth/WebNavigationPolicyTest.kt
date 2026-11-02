@@ -50,4 +50,18 @@ class WebNavigationPolicyTest {
         listOf("javascript:alert(1)", "http://captcha.example/", "https://user:pass@captcha.example/").forEach { url ->
             assertEquals(url, false, WebNavigationPolicy.mayLoadInWebView(url, isMainFrame = false))
         }
-    }}
+    }
+    @Test fun embeddedDataResourcesDoNotBecomeTopLevelPages() {
+        listOf("data:image/svg+xml,<svg></svg>", "data:font/woff2;base64,AAAA", "about:blank", "blob:https://chat.deepseek.com/id").forEach { url ->
+            assertEquals(url, true, WebNavigationPolicy.mayLoadResource(url))
+            assertEquals(url, false, WebNavigationPolicy.mayLoadInWebView(url, isMainFrame = true))
+        }
+    }
+    @Test fun captchaBootstrapFramesUseNormalWebViewOriginIsolation() {
+        assertEquals(true, WebNavigationPolicy.mayLoadInWebView("about:blank", isMainFrame = false))
+        assertEquals(true, WebNavigationPolicy.mayLoadInWebView("blob:https://captcha.example/id", isMainFrame = false))
+        listOf("blob:http://captcha.example/id", "blob:file:///private", "blob:null/id", "file:///private", "content://contacts/1", "http://captcha.example/").forEach { url ->
+            assertEquals(url, false, WebNavigationPolicy.mayLoadResource(url))
+        }
+    }
+}

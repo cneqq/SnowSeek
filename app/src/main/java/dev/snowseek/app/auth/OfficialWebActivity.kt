@@ -16,6 +16,7 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.webkit.ConsoleMessage
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -29,6 +30,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.OpenInBrowser
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -59,6 +61,8 @@ import dev.snowseek.app.settings.SettingsStore
 import dev.snowseek.app.ui.theme.SnowSeekTheme
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.retryWhen
@@ -84,6 +88,10 @@ class OfficialWebActivity : ComponentActivity() {
     private var clearing by mutableStateOf(false)
     private var connecting by mutableStateOf(false)
     private var sessionCleared by mutableStateOf(false)
+    private var pageReady by mutableStateOf(false)
+    private var blankCheck: Job? = null
+    private var scriptErrors = 0
+    private var resourceErrors = 0
     private val russian get() = intent.getStringExtra("language") != "en"
     private fun text(ru: String, en: String) = if (russian) ru else en
 
@@ -140,7 +148,7 @@ class OfficialWebActivity : ComponentActivity() {
 
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                 // Keep normal valid HTTPS CDN/CAPTCHA resources; block local and cleartext resources.
-                return if (WebNavigationPolicy.classify(request.url.toString()) != NavigationDecision.BLOCKED) null
+                return if (WebNavigationPolicy.mayLoadResource(request.url.toString())) null
                 else WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
             }
 
@@ -152,20 +160,29 @@ class OfficialWebActivity : ComponentActivity() {
                 }
                 error = null
                 loading = true
+                pageReady = false
+                scriptErrors = 0
+                resourceErrors = 0
+                blankCheck?.cancel()
             }
 
             override fun onPageFinished(view: WebView, url: String?) {
                 loading = false
+                settings.cacheMode = WebSettings.LOAD_DEFAULT
                 // Persist WebView's own cookies without exposing their values to the app.
                 CookieManager.getInstance().flush()
+                checkPageContent(view, url)
             }
 
             override fun onReceivedError(view: WebView, request: WebResourceRequest, failure: WebResourceError) {
-                if (request.isForMainFrame) showLoadError()
+                if (request.isForMainFrame) showLoadError() else resourceErrors++
             }
 
             override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, response: WebResourceResponse) {
-                if (request.isForMainFrame && response.statusCode >= 400) showLoadError()
+                if (request.isForMainFrame && response.statusCode >= 400) {
+                    showLoadError()
+                    error = error + " (HTTP ${response.statusCode})"
+                } else if (response.statusCode >= 400) resourceErrors++
             }
 
             override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, failure: SslError) {
@@ -174,6 +191,10 @@ class OfficialWebActivity : ComponentActivity() {
             }
         }
         webChromeClient = object : WebChromeClient() {
+            override fun onConsoleMessage(message: ConsoleMessage): Boolean {
+                if (message.messageLevel() == ConsoleMessage.MessageLevel.ERROR) scriptErrors++
+                return true // Never forward potentially sensitive website console messages to logs.
+            }
             override fun onProgressChanged(view: WebView, newProgress: Int) {
                 this@OfficialWebActivity.progress = newProgress / 100f
             }
@@ -195,7 +216,7 @@ class OfficialWebActivity : ComponentActivity() {
                 val restore = stateToRestore?.takeIf { savedWebRevision == revision }
                 savedWebState = null
                 // WebView restores navigation history, not a guaranteed form/DOM/CAPTCHA snapshot.
-                if (restore == null || view.restoreState(restore) == null) view.loadUrl(url)
+                if (restore == null || view.restoreState(restore) == null) view.loadUrl(url, HTML_HEADERS)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
@@ -219,10 +240,59 @@ class OfficialWebActivity : ComponentActivity() {
     }
     private fun showLoadError() {
         loading = false
+        pageReady = false
         error = text(
             "Страница не загрузилась. Проверьте сеть и повторите попытку. Для входа также можно открыть браузер.",
             "The page could not load. Check your connection and retry, or use your browser to sign in.",
         )
+    }
+
+    private fun reloadPage() {
+        if (clearing || connecting || sessionCleared) return
+        webView?.let { view ->
+            view.settings.cacheMode = WebSettings.LOAD_NO_CACHE
+            val url = view.url?.takeIf { WebNavigationPolicy.classify(it) == NavigationDecision.INTERNAL } ?: OFFICIAL_URL
+            startPage(view, url = url)
+        }
+    }
+
+    /** Inspect only paint/viewport flags, never page text, input values, cookies or tokens. */
+    private fun checkPageContent(view: WebView, finishedUrl: String?) {
+        blankCheck?.cancel()
+        if (finishedUrl?.toUri()?.host != "chat.deepseek.com") return
+        blankCheck = lifecycleScope.launch {
+            repeat(3) {
+                delay(3_000)
+                if (webView !== view || view.url != finishedUrl || sessionCleared || clearing || error != null) return@launch
+                val raw = withTimeoutOrNull(2_000) { suspendCancellableCoroutine<String> { continuation ->
+                    view.evaluateJavascript("""
+                        (() => { const body = document.body;
+                          const visible = body && (body.innerText.trim().length > 0 ||
+                            Array.from(body.querySelectorAll('input,button,form,canvas,iframe,img,svg')).some(e => {
+                              const r=e.getBoundingClientRect(); const s=getComputedStyle(e);
+                              return r.width>1 && r.height>1 && s.visibility!=='hidden' && s.display!=='none'; }));
+                          const nav=performance.getEntriesByType('navigation')[0];
+                          return JSON.stringify({visible:!!visible,width:innerWidth,height:innerHeight,
+                            status:nav && typeof nav.responseStatus==='number' ? nav.responseStatus : 0}); })();
+                    """.trimIndent()) { value -> if (continuation.isActive) continuation.resume(value) }
+                } } ?: "null"
+                val probe = try {
+                    val inner = Json.parseToJsonElement(raw).jsonPrimitive.content
+                    Json.parseToJsonElement(inner).jsonObject
+                } catch (_: Exception) { null }
+                if ((probe?.get("visible") as? JsonPrimitive)?.booleanOrNull == true) { pageReady = true; return@launch }
+                if (it == 2) {
+                    val status = (probe?.get("status") as? JsonPrimitive)?.intOrNull?.takeIf { code -> code > 0 }
+                    val webVersion = WebView.getCurrentWebViewPackage()?.versionName ?: "unknown"
+                    val viewport = "${view.width}×${view.height}"
+                    error = text(
+                        "DeepSeek не отобразил страницу в WebView. Нажмите обновление. Если в браузере сайт работает, проверьте обновление Android System WebView/Chrome.",
+                        "DeepSeek did not render in WebView. Tap reload. If it works in your browser, check Android System WebView/Chrome updates.",
+                    ) + "\nWebView $webVersion · ${status?.let { code -> "HTTP $code · " } ?: ""}$viewport · JS $scriptErrors · resources $resourceErrors"
+                    pageReady = false
+                }
+            }
+        }
     }
 
     private fun navigateBack() {
@@ -291,6 +361,9 @@ class OfficialWebActivity : ComponentActivity() {
                     }
                 },
                 actions = {
+                    IconButton(onClick = ::reloadPage, enabled = !clearing && !connecting && !sessionCleared) {
+                        Icon(Icons.Default.Refresh, text("Обновить страницу", "Reload page"))
+                    }
                     IconButton(onClick = { externalUrl = webView?.url?.takeIf {
                         WebNavigationPolicy.classify(it) == NavigationDecision.INTERNAL
                     } ?: OFFICIAL_URL }, enabled = !clearing) {
@@ -313,7 +386,7 @@ class OfficialWebActivity : ComponentActivity() {
                     TextButton(onClick = { confirmLogout = true }, enabled = !clearing && !sessionCleared && !connecting) {
                         Text(if (clearing) text("Очистка…", "Clearing…") else text("Выйти с сайта", "Sign out of website"))
                     }
-                    Button(onClick = ::connectAccount, enabled = !clearing && !connecting && !sessionCleared) {
+                    Button(onClick = ::connectAccount, enabled = pageReady && !loading && !clearing && !connecting && !sessionCleared) {
                         Text(if (connecting) text("Проверка…", "Checking…") else text("Подключить SnowSeek", "Connect SnowSeek"))
                     }
                 }
@@ -324,14 +397,7 @@ class OfficialWebActivity : ComponentActivity() {
                     Column(Modifier.padding(16.dp)) {
                         Text(currentError, color = MaterialTheme.colorScheme.error)
                         if (!sessionCleared) {
-                            Button(onClick = {
-                                error = null
-                                loading = true
-                                val retryUrl = webView?.url?.takeIf {
-                                    WebNavigationPolicy.classify(it) == NavigationDecision.INTERNAL
-                                } ?: OFFICIAL_URL
-                                webView?.let { startPage(it, url = retryUrl) }
-                            }, enabled = !clearing) { Text(text("Повторить", "Retry")) }
+                            Button(onClick = ::reloadPage, enabled = !clearing && !connecting) { Text(text("Повторить", "Retry")) }
                         } else {
                             OutlinedButton(onClick = { finish() }) { Text(text("Закрыть", "Close")) }
                         }
@@ -410,11 +476,13 @@ class OfficialWebActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        blankCheck?.cancel()
         webView?.let { releaseWebView(it) }
         super.onDestroy()
     }
     companion object {
         const val OFFICIAL_URL = "https://chat.deepseek.com/"
+        val HTML_HEADERS = mapOf("Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
         private const val STATE_WEB = "official_web_state"
         private const val STATE_REVISION = "official_web_revision"
     }

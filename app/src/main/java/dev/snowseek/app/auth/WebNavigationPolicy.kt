@@ -8,11 +8,21 @@ enum class NavigationDecision { INTERNAL, EXTERNAL_BROWSER, BLOCKED }
 
 /** External HTTPS URLs require explicit browser confirmation; they never load in WebView. */
 object WebNavigationPolicy {
-    fun mayLoadInWebView(url: String, isMainFrame: Boolean): Boolean = when (classify(url)) {
+    fun mayLoadInWebView(url: String, isMainFrame: Boolean): Boolean {
+        if (!isMainFrame && (url == "about:blank" || isHttpsBlob(url))) return true
+        return when (classify(url)) {
         NavigationDecision.INTERNAL -> true
         NavigationDecision.EXTERNAL_BROWSER -> !isMainFrame
         NavigationDecision.BLOCKED -> false
+        }
     }
+
+    /** Embedded resources are not top-level navigation. WebView applies origin isolation and CSP. */
+    fun mayLoadResource(url: String): Boolean = url == "about:blank" ||
+        url.startsWith("data:", ignoreCase = true) || isHttpsBlob(url) || classify(url) != NavigationDecision.BLOCKED
+
+    private fun isHttpsBlob(url: String): Boolean = url.startsWith("blob:", ignoreCase = true) &&
+        classify(url.substring(5)) != NavigationDecision.BLOCKED
 
     fun classify(url: String): NavigationDecision {
         // Avoid differences between URI parsing and browser URL normalization.

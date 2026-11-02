@@ -46,7 +46,7 @@ class OfficialPowEngine(private val context: Context) {
                         if (request.isForMainFrame) loaded.completeExceptionally(DeepSeekFailure("Не удалось загрузить официальный PoW-клиент. Откройте вход. / Could not load official PoW client; open sign-in."))
                     }
                 }
-                browser.loadUrl(OfficialWebActivity.OFFICIAL_URL)
+                browser.loadUrl(OfficialWebActivity.OFFICIAL_URL, OfficialWebActivity.HTML_HEADERS)
                 loaded.await()
                 if (WebSession.awaitReady() != readyRevision) throw DeepSeekFailure("Сессия изменена. Войдите снова. / Session changed; sign in again.")
                 browser.evaluateJavascript(workerScript(challenge), null)
