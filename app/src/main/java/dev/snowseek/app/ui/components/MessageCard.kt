@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.snowseek.app.ui.BrandMark
 import dev.snowseek.app.ui.LocalWords
+import dev.snowseek.app.ui.LocalDemoMode
 import dev.snowseek.core.ChatMessage
 import dev.snowseek.core.MessageRole
 import dev.snowseek.core.MessageStatus
@@ -39,6 +40,7 @@ import kotlinx.coroutines.delay
 @Composable
 fun MessageCard(message: ChatMessage) {
     val w = LocalWords.current
+    val demo = LocalDemoMode.current
     val user = message.role == MessageRole.USER
     Column(Modifier.fillMaxWidth(), horizontalAlignment = if (user) Alignment.End else Alignment.Start) {
         if (user) {
@@ -49,8 +51,8 @@ fun MessageCard(message: ChatMessage) {
         } else {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 BrandMark(28)
-                Text("SnowSeek", style = MaterialTheme.typography.labelLarge)
-                Text(w.text("ДЕМО", "DEMO"), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(if (demo) "SnowSeek" else "DeepSeek", style = MaterialTheme.typography.labelLarge)
+                if (demo) Text(w.text("ДЕМО", "DEMO"), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Spacer(Modifier.height(12.dp))
             if (message.reasoning.isNotEmpty()) {
@@ -60,7 +62,7 @@ fun MessageCard(message: ChatMessage) {
                     Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Icon(Icons.Outlined.Psychology, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
-                            Text(w.text("Ход размышлений · демо", "Thinking summary · demo"), modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelMedium)
+                            Text(if (demo) w.text("Ход размышлений · демо", "Thinking summary · demo") else w.text("Размышления", "Thinking"), modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelMedium)
                             Icon(if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore, w.text("Развернуть / свернуть", "Expand / collapse"), Modifier.size(18.dp))
                         }
                         if (expanded) SelectionContainer { Text(message.reasoning, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -72,13 +74,15 @@ fun MessageCard(message: ChatMessage) {
             if (message.status == MessageStatus.GENERATING) {
                 Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     CircularProgressIndicator(Modifier.size(13.dp), strokeWidth = 2.dp)
-                    Text(w.text("Создаётся демоответ…", "Generating a demo reply…"), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(if (demo) w.text("Создаётся демоответ…", "Generating a demo reply…") else w.text("DeepSeek отвечает…", "DeepSeek is responding…"), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             } else {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     CopyButton(message.text, w.text("Копировать ответ", "Copy reply"))
                     if (message.status == MessageStatus.STOPPED || message.status == MessageStatus.ERROR) {
-                        Text(if (message.status == MessageStatus.STOPPED) w.text("Генерация остановлена", "Generation stopped") else w.text("Ошибка сохранения ответа", "Could not save reply"),
+                        Text(if (message.status == MessageStatus.STOPPED) {
+                            if (demo) w.text("Генерация остановлена", "Generation stopped") else w.text("Получение ответа остановлено", "Receiving stopped")
+                        } else w.text("Ошибка получения ответа", "Could not receive reply"),
                             style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }

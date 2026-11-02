@@ -2,16 +2,16 @@
 
 Неофициальный открытый Android-клиент с нативным интерфейсом для дальнейшего исследования интеграции DeepSeek. **Не связан с DeepSeek и не одобрен им.** Android 8.0+ (API 26).
 
-**Текущая версия — локальная демонстрация. Ответы не поступают от DeepSeek.** DeepThink и Search моделируются на устройстве; настоящий интернет-поиск отсутствует. Вход на официальном сайте не подключает нативный чат. Платный Developer API не используется.
+**0.2.0 — экспериментальная интеграция бесплатной веб-версии DeepSeek с нативным чатом.** Нажмите «Войти в DeepSeek» (или откройте вход в настройках), завершите авторизацию/CAPTCHA на официальном сайте и нажмите **«Подключить SnowSeek»**. Приложение проверит сессию отдельным HTTP-запросом и загрузит реальные диалоги. До подключения доступен прежний локальный демочат. Платный Developer API не используется. Полный цикл на телефоне требует практической проверки.
 
 ## Что реализовано
 
 - Kotlin, Jetpack Compose и Material 3, MVVM, Coroutines/Flow.
 - Приветствие, история диалогов, создание и удаление чатов с подтверждением.
-- Отправка, потоковая демонстрационная генерация, остановка и сохранение частичного ответа.
-- Локальное сохранение истории между запусками. Атомарная запись в приватном каталоге приложения; ошибка чтения не подменяется пустой историей.
+- Отправка и потоковые ответы через выбранный провайдер, остановка получения и отображение частичного ответа.
+- Локальная история демочата сохраняется атомарно. Реальные диалоги и сообщения загружаются из аккаунта DeepSeek; отдельного постоянного кеша реальных сообщений на устройстве нет.
 - Markdown: заголовки, абзацы, списки, цитаты, жирный и моноширинный текст, блоки кода. Подсветка распространённых ключевых слов Kotlin/Java/Python/JS/TS/JSON, копирование ответа/кода и выделение текста. Это ограниченный renderer, не полный CommonMark; HTML не исполняется, Markdown-ссылки отображаются как текст.
-- Раскрываемая **демонстрационная** сводка размышлений, переключатели DeepThink/Search.
+- Раскрываемые размышления и переключатели DeepThink/Search; в деморежиме они моделируются локально.
 - Системная/светлая/тёмная тема, русский/английский язык, размер текста, переключатель анимаций. Настройки в DataStore.
 - Официальный сайт `https://chat.deepseek.com/` в отдельном WebView: загрузка, ошибки, повтор, навигация назад, открытие браузера, очистка веб-сессии.
 - Gradle Wrapper, unit-тесты, Android Lint, GitHub Actions с Debug APK и условным подписанным Release APK.
@@ -66,18 +66,18 @@ app/src/main/java/dev/snowseek/app/
 .github/workflows/android.yml
 ```
 
-`ChatProvider` определяет пользователя, чаты, сообщения, отправку, поток и остановку. `MockChatProvider` работает полностью локально. `DeepSeekWebProvider` **отключён** и сообщает о недоступности, не выполняя сетевых запросов. Отдельный JVM-модуль позволяет тестировать жизненный цикл генерации без Android.
+`ChatProvider` определяет пользователя, чаты, сообщения, отправку, поток и остановку. `MockChatProvider` работает локально. После явного подключения аккаунта используется `DeepSeekWebProvider`: профиль, список/создание/удаление чатов, история, отправка, SSE и THINK/RESPONSE. HTTP-транспорт использует платформенный HTTPS-клиент Android с проверкой TLS и запрещёнными редиректами. Ошибки и неоднозначный результат отправки не вызывают автоматическую повторную отправку.
 
-Этап 4: проведено [исследование веб-интеграции](docs/web-integration-research.md) по трём HAR, открытой реализации и запросам к самому сервису. Отдельным HTTP-клиентом подтверждены профиль, каталог и история; записанные SSE-потоки восстановлены и сверены с историей. Полная Android-интеграция не включена: допустимость приватного доступа по условиям сервиса не подтверждена, Android-перенос сессии и штатный PoW не проверены. Внутренние `/api/v0/*` не являются стабильным публичным API. Код проекта `kittors/deepseek-web-api` не заимствован. OkHttp не добавлен как неиспользуемая зависимость.
+Интеграция основана на ранее [проверенных HAR и HTTP/SSE-форматах](docs/web-integration-research.md). Отчёт фиксирует состояние исследования до реализации 0.2.0. Внутренние `/api/v0/*` не являются стабильным публичным API и могут измениться. Для каждой генерации запрашивается свежая PoW-задача и исполняется официальный Web Worker в WebView; обходов и собственного PoW-алгоритма нет. При недоступном worker или проверке сервиса показывается ошибка, ответ не подменяется демонстрацией.
 
-WebView используется для официального сайта и авторизации. Нативные экраны чата самостоятельны. Приложение не определяет успешность веб-входа и не читает cookies, пароли или токены. Сессия сайта не передаётся в нативный провайдер.
+WebView используется для официального входа и штатного PoW. Нативные экраны чата самостоятельны. Только после нажатия «Подключить SnowSeek» приложение читает веб-токен из официального origin, проверяет его через `/users/current` и сохраняет зашифрованным AES-GCM с ключом Android Keystore. Cookies официального origin используются для запросов к тому же origin. Пароль приложение не читает, JS bridge не добавляется, токены и содержимое запросов не логируются.
 
 ## Авторизация и данные
 
 - Пароли вводятся на официальном сайте. CAPTCHA и остальные проверки выполняются пользователем обычным способом. Обходов CAPTCHA/Proof-of-Work нет.
 - JavaScript и DOM storage разрешены для работы сайта; JS bridge, файловый доступ и смешанный HTTP-контент не используются. Ошибки TLS не игнорируются.
 - Сторонняя HTTPS-авторизация открывается в системном браузере по явному действию. Cookies браузера и WebView не общие: OAuth/SSO и некоторые CAPTCHA могут не работать. Можно пользоваться всем официальным сайтом в браузере.
-- Обычная веб-сессия хранится средствами Android WebView. **Выход** в настройках удаляет cookies, WebStorage, кеш и HTTP-auth данные приложения, с ожиданием завершения удаления cookies. Это локальный выход, не отзыв всех сессий аккаунта на сервере.
+- Обычная веб-сессия хранится средствами Android WebView. **Выход** удаляет зашифрованный нативный токен, cookies, WebStorage, кеш и HTTP-auth данные приложения, с ожиданием завершения удаления cookies. Это локальный выход, не отзыв всех сессий аккаунта на сервере.
 - Демочаты хранятся в sandbox приложения, без отдельного прикладного шифрования. Они не являются секретным хранилищем: не вводите в демонстрацию пароли и ключи. Защита файлов зависит от защиты устройства и Android; root/разблокированное устройство вне этой модели.
 - Облачный backup и перенос данных исключены манифестом и правилами backup. Удаление приложения удаляет историю. Логи запросов/учётных данных, аналитика и промежуточные серверы отсутствуют.
 - Выход из веб-аккаунта сохраняет локальные демочаты; удалить диалог можно в истории. Данные сайта передаются непосредственно официальному сайту и его ресурсам средствами WebView.
@@ -111,7 +111,7 @@ CI повторяет unit-тесты, lint и сборку APK. При уста
 
 Android-устройство или эмулятор не были подключены. Остаются проверки: ширина 320/360/412 dp; светлая/тёмная тема; увеличенный системный шрифт; длинные сообщения/код; клавиатура и прокрутка; stop во время генерации; перезапуск и восстановление; airplane mode; вход/CAPTCHA и выход с повторным открытием сайта. Компиляция и unit-тесты не доказывают работоспособность веб-входа или качество раскладки на устройстве.
 
-Пока нет реальных ответов DeepSeek, полноценного интернет-поиска, перегенерации, вложений, изображений, экспорта, редактирования сообщений или специальных планшетных раскладок.
+Ограничения 0.2.0: каталог загружает до 100 последних чатов; перегенерация, вложения, изображения, экспорт, редактирование и планшетные раскладки не реализованы. Кнопка Stop прекращает получение SSE; удалённая генерация может продолжиться, поскольку серверная команда остановки не подтверждена. Перед повтором после ошибки откройте диалог заново для сверки истории. Google/OAuth и CAPTCHA могут ограничиваться самим WebView; сессия внешнего браузера автоматически обратно не переносится. Если приватный протокол или официальный PoW worker изменится, потребуется обновление клиента.
 
 ## Лицензии
 
@@ -119,12 +119,12 @@ SnowSeek распространяется под [GNU GPLv3](LICENSE). Инфо�
 
 ## English
 
-SnowSeek is an **unofficial, open-source Android 8.0+ app**, not affiliated with DeepSeek. It currently offers a native **offline demo chat**, on-device conversation history, simulated streaming/DeepThink/Search, basic Markdown and code highlighting, RU/EN UI, themes and settings. Replies are not generated by DeepSeek.
+SnowSeek is an **unofficial, open-source Android 8.0+ app**, not affiliated with DeepSeek. Version 0.2.0 connects the native Compose chat to a user's free DeepSeek web account: conversation list/history, create/delete, messages and SSE reasoning/answers. The offline demo remains available before connecting. Markdown, code highlighting, RU/EN UI, themes and settings are preserved.
 
-The separate WebView opens the official DeepSeek website. You sign in there yourself; the app does not read credentials or transfer cookies into a native HTTP client. Website login does not connect the native chat. CAPTCHA/OAuth support depends on the website and Android WebView; use the system browser when needed. Sign out clears local website data and keeps demo conversations.
+Sign in on the official website, then tap **Connect SnowSeek**. The app verifies the web token through native HTTPS and encrypts it with an Android Keystore key. Passwords are never read; no credentials are logged. Official-origin cookies are used only for that origin. The official Web Worker performs fresh PoW checks; CAPTCHA/WAF/PoW are not bypassed. Sign out clears the native token and website data, keeping demo conversations. External-browser sign-in is not automatically transferred back to WebView.
 
 Build using JDK 17/21, Android SDK 37.0 and `bash ./gradlew :core:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug` (Windows: `gradlew.bat`). Install `app/build/outputs/apk/debug/app-debug.apk`. GitHub Actions uploads a Debug APK without secrets; signed releases require a pushed `v*` tag and all four signing secrets listed above. No release is published when secrets are incomplete.
 
-Native DeepSeek integration is deliberately disabled until the private protocol and permitted integration are verified. No paid Developer API, CAPTCHA/PoW bypass, proxy server, tracking or advertisements. GPLv3; see LICENSE and third-party notices.
+The private web integration is experimental and requires phone testing. Up to 100 conversations are loaded; Stop closes local stream reception and does not guarantee stopping server generation. Failed/uncertain sends are never automatically repeated. Website protection and worker changes may require updating the app. No paid Developer API, proxy server, tracking or advertisements. GPLv3; see LICENSE and third-party notices.
 
 Verified locally on 2 November 2026: Debug and unsigned Release builds, all 34 unit tests, APK signature/alignment and workflow syntax. Android Lint reports no errors and two warnings (target SDK 36 and an empty local resource directory). No device/emulator validation or GitHub Actions run was performed; website login/CAPTCHA remains untested.

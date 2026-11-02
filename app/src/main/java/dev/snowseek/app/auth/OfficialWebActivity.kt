@@ -63,8 +63,13 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.serialization.json.*
+import kotlin.coroutines.resume
+import dev.snowseek.app.data.DeepSeekHttpTransport
+import dev.snowseek.core.DeepSeekFailure
 
-/** Official website only; its sign-in never enables the native demo provider. */
+/** User signs in on the official website and explicitly connects their session to SnowSeek. */
 class OfficialWebActivity : ComponentActivity() {
     private var webView: WebView? = null
     private var savedWebState: Bundle? = null
@@ -77,6 +82,7 @@ class OfficialWebActivity : ComponentActivity() {
     private var externalUrl by mutableStateOf<String?>(null)
     private var confirmLogout by mutableStateOf(false)
     private var clearing by mutableStateOf(false)
+    private var connecting by mutableStateOf(false)
     private var sessionCleared by mutableStateOf(false)
     private val russian get() = intent.getStringExtra("language") != "en"
     private fun text(ru: String, en: String) = if (russian) ru else en
@@ -235,6 +241,41 @@ class OfficialWebActivity : ComponentActivity() {
         }
     }
 
+    private fun connectAccount() {
+        if (connecting || clearing || sessionCleared) return
+        val view = webView ?: return
+        fun official() = view.url?.toUri()?.let { it.scheme == "https" && it.host == "chat.deepseek.com" && it.port in listOf(-1, 443) } == true
+        if (!official()) { error = text("Откройте официальный DeepSeek и войдите в аккаунт.", "Open the official DeepSeek page and sign in."); return }
+        connecting = true
+        lifecycleScope.launch {
+            try {
+                val revision = WebSession.awaitReady()
+                val result = suspendCancellableCoroutine<String> { continuation ->
+                    view.evaluateJavascript("""
+                        (() => { const raw = localStorage.getItem('userToken'); if (!raw) return null;
+                          try { const value = JSON.parse(raw); return typeof value === 'string' ? value :
+                            (value && typeof value.value === 'string' ? value.value : null); }
+                          catch (_) { return raw; } })();
+                    """.trimIndent()) { value -> if (continuation.isActive) continuation.resume(value) }
+                }
+                if (!official() || sessionCleared || WebSession.awaitReady() != revision) throw DeepSeekFailure("Страница входа изменилась. Повторите вход. / Sign-in page changed; retry.")
+                val token = (Json.parseToJsonElement(result) as? JsonPrimitive)?.contentOrNull
+                    ?.takeIf { it.isNotBlank() && it != "null" && it.length < 16_384 }
+                    ?: throw DeepSeekFailure("Сначала завершите вход и CAPTCHA на сайте. / Complete website sign-in and CAPTCHA first.")
+                // Prove native HTTP compatibility before persisting or reporting a connected account.
+                DeepSeekHttpTransport(applicationContext, token).request("/api/v0/users/current")
+                if (sessionCleared || !official() || WebSession.awaitReady() != revision) throw DeepSeekFailure("Вход был отменён. / Sign-in was cancelled.")
+                // Main-thread publication is consecutive with the revision check and logout registration.
+                DeepSeekCredentials.get(applicationContext).save(token)
+                SettingsStore(applicationContext).completeWelcome()
+                finish()
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) {
+                error = (failure as? DeepSeekFailure)?.message ?: text("Не удалось сохранить подключение. Повторите вход.", "Connection could not be saved; sign in again.")
+            } finally { connecting = false }
+        }
+    }
+
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     private fun OfficialScreen() {
@@ -262,15 +303,18 @@ class OfficialWebActivity : ComponentActivity() {
                 settingsError?.let { Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error) }
                 Text(
                     text(
-                        "Официальный сайт. Вход здесь не подключает нативный демо-чат. CAPTCHA и некоторые способы входа могут потребовать браузер.",
-                        "Official website. Signing in here does not connect the native demo chat. CAPTCHA and some sign-in methods may require a browser.",
+                        "Войдите на официальном сайте, затем нажмите «Подключить SnowSeek» для нативного чата. Пароль остаётся на сайте.",
+                        "Sign in on the official website, then tap Connect SnowSeek for native chat. Your password stays on the website.",
                     ),
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                    TextButton(onClick = { confirmLogout = true }, enabled = !clearing && !sessionCleared) {
+                    TextButton(onClick = { confirmLogout = true }, enabled = !clearing && !sessionCleared && !connecting) {
                         Text(if (clearing) text("Очистка…", "Clearing…") else text("Выйти с сайта", "Sign out of website"))
+                    }
+                    Button(onClick = ::connectAccount, enabled = !clearing && !connecting && !sessionCleared) {
+                        Text(if (connecting) text("Проверка…", "Checking…") else text("Подключить SnowSeek", "Connect SnowSeek"))
                     }
                 }
                 if (clearing) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())

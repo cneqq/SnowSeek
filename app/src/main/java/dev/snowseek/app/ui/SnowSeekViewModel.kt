@@ -4,6 +4,8 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.snowseek.app.auth.WebSession
+import dev.snowseek.app.auth.DeepSeekCredentials
+import dev.snowseek.app.data.DeepSeekHttpTransport
 import dev.snowseek.app.data.FileChatStore
 import dev.snowseek.app.settings.AppSettings
 import dev.snowseek.app.settings.SettingsStore
@@ -11,6 +13,11 @@ import dev.snowseek.app.settings.ThemeMode
 import dev.snowseek.core.ChatOptions
 import dev.snowseek.core.ChatSession
 import dev.snowseek.core.MockChatProvider
+import dev.snowseek.core.ChatProvider
+import dev.snowseek.core.DeepSeekWebProvider
+import dev.snowseek.core.DeepSeekFailure
+import dev.snowseek.core.DeepSeekDeliveryUncertain
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
@@ -36,11 +43,17 @@ data class ChatUiState(
     val initialized: Boolean = false,
     val signedOut: Boolean = false,
     val signingOut: Boolean = false,
+    val isDemo: Boolean = true,
+    val errorMessage: String? = null,
 )
 
 class SnowSeekViewModel(application: Application) : AndroidViewModel(application) {
     private val preferences = SettingsStore(application)
-    private val provider = MockChatProvider(FileChatStore(application))
+    private val credentials = DeepSeekCredentials.get(application)
+    private val transport = DeepSeekHttpTransport(application)
+    private val demo = MockChatProvider(FileChatStore(application))
+    private val web = DeepSeekWebProvider(transport)
+    private var provider: ChatProvider = if (credentials.token() == null) demo else web
     private val mutableUi = MutableStateFlow(ChatUiState())
     val ui = mutableUi.asStateFlow()
     private val mutableSettingsReady = MutableStateFlow(false)
@@ -57,27 +70,54 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
     private var generation: Job? = null
     private var activeChatId: String? = null
     private var initialization: Job? = null
+    private var providerCollection: Job? = null
+    private var historyLoad: Job? = null
+    private var historyRevision = 0L
 
     init {
-        viewModelScope.launch {
-            provider.chats.collect { chats -> mutableUi.update { it.copy(chats = chats) } }
-        }
+        bindProvider()
         initialize()
+        viewModelScope.launch {
+            credentials.changes.drop(1).collect {
+                activeChatId?.let { provider.stopGeneration(it) }
+                generation?.cancelAndJoin()
+                initialization?.cancelAndJoin()
+                historyLoad?.cancelAndJoin()
+                if (provider === web) web.clear()
+                provider = if (credentials.token() == null) demo else web
+                mutableUi.value = ChatUiState(isDemo = provider === demo)
+                bindProvider()
+                initialize()
+            }
+        }
+    }
+    private fun bindProvider() {
+        providerCollection?.cancel()
+        val selected = provider
+        mutableUi.update { it.copy(isDemo = selected === demo) }
+        providerCollection = viewModelScope.launch {
+            selected.chats.collect { chats -> mutableUi.update { it.copy(chats = chats) } }
+        }
+    }
+    private fun report(failure: Exception) {
+        mutableUi.update { it.copy(error = true, errorMessage = (failure as? DeepSeekFailure)?.message) }
     }
 
     fun initialize() {
         if (initialization?.isActive == true) return
-        mutableUi.update { it.copy(loading = true, error = false) }
+        mutableUi.update { it.copy(loading = true, error = false, errorMessage = null) }
         initialization = viewModelScope.launch {
             try {
                 provider.initialize()
+                val firstId = provider.chats.value.firstOrNull()?.id
+                if (firstId != null && provider === web) provider.getMessages(firstId)
                 mutableUi.update {
-                    it.copy(selectedId = provider.chats.value.firstOrNull()?.id, initialized = true)
+                    it.copy(selectedId = firstId, initialized = true)
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
-            } catch (_: Exception) {
-                mutableUi.update { it.copy(error = true) }
+            } catch (failure: Exception) {
+                report(failure)
             } finally {
                 mutableUi.update { it.copy(loading = false) }
             }
@@ -85,10 +125,22 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun input(value: String) { mutableUi.update { it.copy(input = value.take(32_768)) } }
-    fun select(id: String) { mutableUi.update { it.copy(selectedId = id, input = "") } }
+    fun select(id: String) {
+        mutableUi.update { it.copy(selectedId = id, input = "") }
+        if (provider !== web) return
+        historyLoad?.cancel()
+        val ticket = ++historyRevision
+        mutableUi.update { it.copy(loading = true) }
+        historyLoad = viewModelScope.launch {
+            try { provider.getMessages(id) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) { if (historyRevision == ticket && ui.value.selectedId == id) report(failure) }
+            finally { if (historyRevision == ticket && ui.value.selectedId == id) mutableUi.update { it.copy(loading = false) } }
+        }
+    }
     fun deepThink() { mutableUi.update { it.copy(deepThink = !it.deepThink) } }
     fun search() { mutableUi.update { it.copy(search = !it.search) } }
-    fun dismissError() { mutableUi.update { it.copy(error = false, signedOut = false) } }
+    fun dismissError() { mutableUi.update { it.copy(error = false, errorMessage = null, signedOut = false) } }
 
     fun newChat() {
         if (ui.value.generating || ui.value.loading || !ui.value.initialized) return
@@ -98,7 +150,7 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
                 val chat = provider.createChat()
                 mutableUi.update { it.copy(selectedId = chat.id, input = "") }
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { mutableUi.update { it.copy(error = true) } }
+            catch (failure: Exception) { report(failure) }
             finally { mutableUi.update { it.copy(loading = false) } }
         }
     }
@@ -112,8 +164,9 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
                 mutableUi.update {
                     it.copy(selectedId = if (it.selectedId == id) provider.chats.value.firstOrNull()?.id else it.selectedId)
                 }
+                if (provider === web) ui.value.selectedId?.let { provider.getMessages(it) }
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { mutableUi.update { it.copy(error = true) } }
+            catch (failure: Exception) { report(failure) }
             finally { mutableUi.update { it.copy(loading = false) } }
         }
     }
@@ -132,8 +185,9 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
                 provider.sendMessage(chatId, prompt, ChatOptions(current.deepThink, current.search, settings.value.language)).collect { }
             } catch (cancelled: CancellationException) {
                 throw cancelled
-            } catch (_: Exception) {
-                mutableUi.update { it.copy(error = true, input = if (it.input.isEmpty()) prompt else it.input) }
+            } catch (failure: Exception) {
+                report(failure)
+                if (failure !is DeepSeekDeliveryUncertain) mutableUi.update { it.copy(input = if (it.input.isEmpty()) prompt else it.input) }
             } finally {
                 activeChatId = null
                 mutableUi.update { it.copy(generating = false) }
@@ -148,7 +202,7 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
             try {
                 if (chatId != null) provider.stopGeneration(chatId)
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { mutableUi.update { it.copy(error = true) } }
+            catch (failure: Exception) { report(failure) }
             finally { activeJob.cancelAndJoin() }
         }
     }
@@ -157,7 +211,7 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             try { block() }
             catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { mutableUi.update { it.copy(error = true) } }
+            catch (failure: Exception) { report(failure) }
         }
     }
     fun welcomeComplete() = save { preferences.completeWelcome() }
@@ -170,6 +224,8 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
         mutableUi.update { it.copy(signingOut = true) }
         save {
             try {
+                activeChatId?.let { provider.stopGeneration(it) }
+                generation?.cancelAndJoin()
                 WebSession.clear(getApplication())
                 mutableUi.update { it.copy(signedOut = true) }
             } finally {
@@ -177,4 +233,5 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
             }
         }
     }
+    override fun onCleared() { transport.cancelCompletion() }
 }

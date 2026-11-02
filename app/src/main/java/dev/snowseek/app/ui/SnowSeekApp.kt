@@ -65,7 +65,7 @@ fun SnowSeekApp(model: SnowSeekViewModel) {
         context.startActivity(Intent(context, OfficialWebActivity::class.java).putExtra("language", settings.language))
     }
     SnowSeekTheme(settings) {
-        CompositionLocalProvider(LocalWords provides words) {
+        CompositionLocalProvider(LocalWords provides words, LocalDemoMode provides ui.isDemo) {
             Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                 if (!settingsReady) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
@@ -83,13 +83,13 @@ fun SnowSeekApp(model: SnowSeekViewModel) {
                     onDismissRequest = model::dismissError,
                     icon = { Icon(Icons.Outlined.ErrorOutline, null) },
                     title = { Text(words.text("Не удалось выполнить действие", "Something went wrong")) },
-                    text = { Text(words.text(
+                    text = { Text(ui.errorMessage ?: words.text(
                         "Проверьте свободное место и повторите попытку. Если локальная история повреждена, она сохранена без перезаписи. Веб-соединение проверяется отдельно на экране сайта.",
                         "Check available storage and try again. A damaged local history is preserved without overwriting. Website connectivity is handled separately on the website screen.",
                     )) },
                     confirmButton = { TextButton(onClick = {
                         model.dismissError()
-                        if (!ui.initialized) model.initialize()
+                        if (!ui.initialized) model.initialize() else ui.selectedId?.let(model::select)
                     }) { Text(words.text("Повторить", "Try again")) } },
                     dismissButton = { TextButton(onClick = model::dismissError) { Text(words.text("Закрыть", "Close")) } },
                 )
@@ -131,16 +131,16 @@ private fun WelcomeScreen(onContinue: () -> Unit, onWeb: () -> Unit, language: (
             Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
                 WelcomeFeature(Icons.Outlined.Forum, w.text("Нативный чат", "Native conversation"), w.text("Потоковые ответы и история на устройстве", "Streaming replies and on-device history"))
                 WelcomeFeature(Icons.Outlined.Shield, w.text("Ваше пространство", "Your space"), w.text("Без рекламы, трекеров и посредников", "No ads, trackers or intermediary servers"))
-                WelcomeFeature(Icons.Outlined.Science, w.text("Честная демонстрация", "An honest demo"), w.text("Ответы сейчас создаются локально, без DeepSeek", "Replies are generated locally, without DeepSeek"))
+                WelcomeFeature(Icons.Outlined.Science, w.text("Бесплатный аккаунт", "Free web account"), w.text("Вход на официальном сайте, общение в SnowSeek", "Sign in on the official website, chat in SnowSeek"))
             }
         }
         Spacer(Modifier.height(32.dp))
-        Button(onClick = onContinue, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp), shape = RoundedCornerShape(18.dp)) {
-            Text(w.text("Попробовать демочат", "Try the demo")); Spacer(Modifier.width(12.dp)); Icon(Icons.AutoMirrored.Outlined.ArrowForward, null)
+        Button(onClick = onWeb, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp), shape = RoundedCornerShape(18.dp)) {
+            Text(w.text("Войти в DeepSeek", "Sign in to DeepSeek")); Spacer(Modifier.width(12.dp)); Icon(Icons.AutoMirrored.Outlined.ArrowForward, null)
         }
-        TextButton(onClick = onWeb, modifier = Modifier.padding(top = 8.dp)) { Text(w.text("Открыть официальный DeepSeek", "Open the official DeepSeek website")) }
+        TextButton(onClick = onContinue, modifier = Modifier.padding(top = 8.dp)) { Text(w.text("Попробовать демочат", "Try the demo")) }
         Spacer(Modifier.height(24.dp))
-        Text(w.text("Неофициальный открытый клиент. Не связан с DeepSeek. Вход на сайте не подключает нативный чат.", "An unofficial open-source client. Not affiliated with DeepSeek. Website sign-in does not connect the native chat."),
+        Text(w.text("Неофициальный открытый клиент. После входа нажмите «Подключить SnowSeek». Веб-интеграция экспериментальная.", "Unofficial open-source client. After signing in, tap Connect SnowSeek. Web integration is experimental."),
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(28.dp))
     }
@@ -182,7 +182,7 @@ private fun ChatScreen(ui: ChatUiState, settings: AppSettings, model: SnowSeekVi
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), shape = RoundedCornerShape(16.dp)) {
                 Icon(Icons.Outlined.Add, null); Spacer(Modifier.width(8.dp)); Text(w.text("Новый чат", "New chat"))
             }
-            Text(w.text("НА УСТРОЙСТВЕ", "ON THIS DEVICE"), Modifier.padding(start = 24.dp, top = 28.dp, bottom = 8.dp),
+            Text(if (ui.isDemo) w.text("НА УСТРОЙСТВЕ", "ON THIS DEVICE") else "DEEPSEEK", Modifier.padding(start = 24.dp, top = 28.dp, bottom = 8.dp),
                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, letterSpacing = 1.5.sp)
             LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 12.dp)) {
                 items(ui.chats, key = { it.id }) { chat ->
@@ -214,7 +214,7 @@ private fun ChatScreen(ui: ChatUiState, settings: AppSettings, model: SnowSeekVi
                 CenterAlignedTopAppBar(
                     title = { Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(current?.let { chatTitle(it, w) } ?: "SnowSeek", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                        Text(w.text("Локальная демонстрация", "Local demo"), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                        Text(if (ui.isDemo) w.text("Локальная демонстрация", "Local demo") else "DeepSeek · Web", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                     } },
                     navigationIcon = { IconButton(onClick = { scope.launch { drawer.open() } }) { Icon(Icons.Outlined.Menu, w.text("История чатов", "Chat history")) } },
                     actions = { IconButton(onClick = model::newChat, enabled = !ui.generating && !ui.loading && ui.initialized) { Icon(Icons.Outlined.Edit, w.text("Новый чат", "New chat")) } },
@@ -227,7 +227,7 @@ private fun ChatScreen(ui: ChatUiState, settings: AppSettings, model: SnowSeekVi
                 if (!ui.initialized && !ui.loading) {
                     Column(Modifier.weight(1f).fillMaxWidth().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                         Icon(Icons.Outlined.ErrorOutline, null, tint = MaterialTheme.colorScheme.error)
-                        Text(w.text("Не удалось прочитать локальную историю", "Could not read local history"), Modifier.padding(vertical = 16.dp))
+                        Text(if (ui.isDemo) w.text("Не удалось прочитать локальную историю", "Could not read local history") else w.text("Не удалось подключиться к DeepSeek. Проверьте вход в настройках.", "Could not connect to DeepSeek. Check sign-in in settings."), Modifier.padding(vertical = 16.dp))
                         Button(onClick = model::initialize) { Text(w.text("Повторить", "Try again")) }
                     }
                 } else if (current?.messages.isNullOrEmpty()) {
@@ -241,7 +241,7 @@ private fun ChatScreen(ui: ChatUiState, settings: AppSettings, model: SnowSeekVi
     }
     if (deleteId != null) AlertDialog(onDismissRequest = { deleteId = null },
         title = { Text(w.text("Удалить диалог?", "Delete this conversation?")) },
-        text = { Text(w.text("История этого демонстрационного чата будет удалена с устройства.", "This demo conversation will be removed from this device.")) },
+        text = { Text(if (ui.isDemo) w.text("История этого демонстрационного чата будет удалена с устройства.", "This demo conversation will be removed from this device.") else w.text("Диалог будет удалён из аккаунта DeepSeek. Отменить это действие нельзя.", "This conversation will be deleted from your DeepSeek account. This cannot be undone.")) },
         confirmButton = { TextButton(onClick = { deleteId?.let(model::deleteChat); deleteId = null }) { Text(w.text("Удалить", "Delete")) } },
         dismissButton = { TextButton(onClick = { deleteId = null }) { Text(w.text("Отмена", "Cancel")) } })
 }
@@ -358,7 +358,7 @@ private fun Composer(ui: ChatUiState, model: SnowSeekViewModel) {
                 }
             }
         }
-        Text(w.text("Демо · ответы, DeepThink и поиск моделируются на устройстве", "Demo · replies, DeepThink and search are simulated on-device"),
+        Text(if (ui.isDemo) w.text("Демо · ответы, DeepThink и поиск моделируются на устройстве", "Demo · replies, DeepThink and search are simulated on-device") else w.text("DeepSeek · ответы могут содержать ошибки", "DeepSeek · answers may contain mistakes"),
             Modifier.padding(horizontal = 8.dp, vertical = 10.dp), style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
@@ -407,8 +407,8 @@ private fun SettingsScreen(settings: AppSettings, model: SnowSeekViewModel, onBa
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Icon(Icons.Outlined.Science, null, tint = MaterialTheme.colorScheme.primary)
                     Column {
-                        Text(w.text("Демонстрационный провайдер", "Demo provider"), style = MaterialTheme.typography.titleSmall)
-                        Text(w.text("Работает без интернета. Нативная интеграция DeepSeek отключена: протокол не подтверждён.", "Works offline. Native DeepSeek integration is disabled: its protocol has not been verified."), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(if (LocalDemoMode.current) w.text("Демонстрационный провайдер", "Demo provider") else "DeepSeek · Web", style = MaterialTheme.typography.titleSmall)
+                        Text(w.text("Для реального чата войдите на сайте и нажмите «Подключить SnowSeek». Приватный веб-протокол может измениться.", "For real chat, sign in on the website and tap Connect SnowSeek. The private web protocol may change."), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
                 OutlinedButton(onClick = onWeb, modifier = Modifier.fillMaxWidth()) { Text(w.text("Войти на официальном сайте", "Sign in on the official website")) }

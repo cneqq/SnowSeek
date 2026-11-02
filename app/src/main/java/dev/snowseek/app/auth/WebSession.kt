@@ -16,7 +16,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
 
-/** Controls WebView's own session. It never reads or exports cookies or credentials. */
+/** Clears both the native encrypted token and WebView's own website session. */
 object WebSession {
     private val cleanup = SessionCleanupGate(CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate))
     private val activeViews = Collections.newSetFromMap(WeakHashMap<WebView, Boolean>())
@@ -32,6 +32,7 @@ object WebSession {
         // Register cleanup on Main, the same dispatcher used by attach and page loading.
         withContext(NonCancellable + Dispatchers.Main.immediate) {
             cleanup.clear {
+                withContext(Dispatchers.IO) { DeepSeekCredentials.get(appContext).clear() }
                 // Prevent live pages from recreating credentials during cookie removal.
                 activeViews.toList().forEach { view ->
                     view.stopLoading()
