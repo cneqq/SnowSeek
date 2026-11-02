@@ -12,3 +12,5 @@ Thumbs.db
 keystore.properties
 .env
 .env.*
+*.har
+*.har.gz
