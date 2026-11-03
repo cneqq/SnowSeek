@@ -133,7 +133,7 @@ private fun WelcomeScreen(onContinue: () -> Unit, onWeb: () -> Unit, onGoogle: (
         Surface(shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface,
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
             Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
-                WelcomeFeature(Icons.Outlined.Forum, w.text("Нативный чат", "Native conversation"), w.text("Потоковые ответы и история на устройстве", "Streaming replies and on-device history"))
+                WelcomeFeature(Icons.Outlined.Forum, w.text("Ваши диалоги", "Your conversations"), w.text("Ответы в реальном времени и история чатов", "Real-time replies and conversation history"))
                 WelcomeFeature(Icons.Outlined.Shield, w.text("Ваше пространство", "Your space"), w.text("Без рекламы, трекеров и посредников", "No ads, trackers or intermediary servers"))
                 WelcomeFeature(Icons.Outlined.Science, w.text("Бесплатный аккаунт", "Free web account"), w.text("Вход на официальном сайте внутри SnowSeek", "Sign in on the official website inside SnowSeek"))
             }
@@ -142,8 +142,8 @@ private fun WelcomeScreen(onContinue: () -> Unit, onWeb: () -> Unit, onGoogle: (
         Button(onClick = onWeb, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp), shape = RoundedCornerShape(18.dp)) {
             Text(w.text("Войти через DeepSeek", "Sign in with DeepSeek")); Spacer(Modifier.width(12.dp)); Icon(Icons.AutoMirrored.Outlined.ArrowForward, null)
         }
-        Text(w.text("Вход внутри приложения. После проверки аккаунта ваши чаты откроются автоматически.",
-            "Sign in inside the app. Your chats open automatically after account verification."),
+        Text(w.text("Войдите, чтобы открыть свои чаты здесь.",
+            "Sign in to open your chats here."),
             modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Row(Modifier.fillMaxWidth().padding(vertical = 20.dp), verticalAlignment = Alignment.CenterVertically,
@@ -156,13 +156,13 @@ private fun WelcomeScreen(onContinue: () -> Unit, onWeb: () -> Unit, onGoogle: (
             Icon(Icons.AutoMirrored.Outlined.OpenInNew, null, Modifier.size(20.dp)); Spacer(Modifier.width(10.dp))
             Text(w.text("Войти через Google в браузере", "Sign in with Google in browser"))
         }
-        Text(w.text("Только для сайта DeepSeek. Вход через Google в браузере пока не подключает аккаунт к SnowSeek.",
-            "For the DeepSeek website only. Google sign-in in the browser cannot currently connect your account to SnowSeek."),
+        Text(w.text("Чаты откроются на сайте. Для входа в приложение используйте DeepSeek.",
+            "Chats will open on the website. Use DeepSeek to sign in to the app."),
             modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         TextButton(onClick = onContinue, modifier = Modifier.padding(top = 8.dp)) { Text(w.text("Попробовать демочат", "Try the demo")) }
         Spacer(Modifier.height(24.dp))
-        Text(w.text("Неофициальный открытый клиент. Сессия сайта внутри приложения проверяется и сохраняется автоматически. Веб-интеграция экспериментальная.", "Unofficial open-source client. Website sessions inside the app are verified and saved automatically. Web integration is experimental."),
+        Text(w.text("Неофициальный клиент DeepSeek с открытым кодом.", "Unofficial open-source DeepSeek client."),
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(28.dp))
     }

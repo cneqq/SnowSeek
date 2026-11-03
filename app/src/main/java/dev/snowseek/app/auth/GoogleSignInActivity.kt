@@ -10,7 +10,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.browser.customtabs.CustomTabColorSchemeParams
 import androidx.browser.customtabs.CustomTabsClient
 import androidx.browser.customtabs.CustomTabsIntent
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -37,12 +36,14 @@ class GoogleSignInActivity : ComponentActivity() {
     private var waiting by mutableStateOf(false)
     private var returned by mutableStateOf(false)
     private var failed by mutableStateOf(false)
+    private var autoOpenHandled = false
     private val russian get() = intent.getStringExtra("language") != "en"
     private fun label(ru: String, en: String) = if (russian) ru else en
     private val browser = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         // Neither closing a tab nor RESULT_OK proves an authenticated SnowSeek session.
         waiting = false
         returned = true
+        if (intent.getBooleanExtra(EXTRA_FROM_SIGN_IN, false)) finish()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -50,6 +51,7 @@ class GoogleSignInActivity : ComponentActivity() {
         enableEdgeToEdge()
         waiting = savedInstanceState?.getBoolean("waiting") == true
         returned = savedInstanceState?.getBoolean("returned") == true
+        autoOpenHandled = savedInstanceState?.getBoolean("auto_open_handled") == true
         setContent {
             SnowSeekTheme(AppSettings(theme = ThemeMode.DARK)) {
                 val toolbarColor = MaterialTheme.colorScheme.surface.toArgb()
@@ -61,6 +63,11 @@ class GoogleSignInActivity : ComponentActivity() {
                                 CustomTabsClient.isEphemeralBrowsingSupported(this@GoogleSignInActivity, provider))
                         } catch (_: SecurityException) { BrowserPlan(null, false) }
                     }
+                    // The embedded form already presented the explanation and browser action.
+                    if (intent.getBooleanExtra(EXTRA_FROM_SIGN_IN, false) && !autoOpenHandled) {
+                        autoOpenHandled = true
+                        plan?.let { openBrowser(it, toolbarColor) }
+                    }
                 }
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     Column(Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp),
@@ -68,33 +75,26 @@ class GoogleSignInActivity : ComponentActivity() {
                         TextButton(onClick = { finish() }) { Text(label("Назад", "Back")) }
                         BrandMark(64)
                         Text(label("Google в браузере", "Google in your browser"), style = MaterialTheme.typography.headlineMedium)
-                        Text(label("На официальной странице DeepSeek выберите «Войти через Google». Данные входа обрабатывают DeepSeek и Google.",
-                            "Choose Sign in with Google on the official DeepSeek page. DeepSeek and Google handle your sign-in details."))
-                        Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface,
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
-                            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                Text(label("Вход на сайт, без подключения SnowSeek", "Website sign-in, without connecting SnowSeek"),
-                                    style = MaterialTheme.typography.titleMedium)
-                                Text(label("Поддерживаемый способ перенести этот вход в SnowSeek не найден. Даже после входа через Google чаты будут доступны на сайте, а аккаунт в SnowSeek не подключится. Для чатов в приложении используйте встроенную форму DeepSeek.",
-                                    "No supported way to transfer this sign-in to SnowSeek has been found. After signing in with Google, chats are available on the website, but your SnowSeek account remains unconnected. Use the built-in DeepSeek form for chats in the app."),
-                                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
+                        Text(label("На сайте DeepSeek выберите Google. Чаты откроются в браузере, а не в SnowSeek.",
+                            "Choose Google on the DeepSeek website. Your chats will open in the browser, not in SnowSeek."))
+                        Text(label("Для чатов в приложении войдите через DeepSeek по почте.",
+                            "For chats in the app, sign in to DeepSeek with email."),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                         val currentPlan = plan
                         if (currentPlan == null) {
                             LinearProgressIndicator(Modifier.fillMaxWidth())
-                            Text(label("Проверяем возможности браузера…", "Checking browser capabilities…"))
+                            Text(label("Готовим браузер…", "Preparing browser…"))
                         } else {
                             Text(if (currentPlan.isolated) label(
-                                "Браузер сообщает о поддержке отдельной временной вкладки. Запросим новый вход без использования вашей обычной сессии. После закрытия вкладки её данные удаляются браузером.",
-                                "Your browser reports support for a separate temporary tab. We will request a fresh sign-in without your regular session. The browser deletes this tab’s data when it closes.")
+                                "Запросим отдельную временную вкладку для нового входа.",
+                                "We will request a separate temporary tab for a fresh sign-in.")
                             else label(
-                                "Браузер не подтвердил поддержку отдельной сессии. Если вы уже вошли в DeepSeek, сайт может сразу открыть ваши чаты. Принудительно показать новый вход нельзя; обычная сессия браузера сохранится.",
-                                "Your browser has not confirmed support for a separate session. If you are already signed in to DeepSeek, the site may open your chats directly. A fresh sign-in cannot be forced; your regular browser session is preserved."),
-                                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                "Браузер может открыть текущий аккаунт DeepSeek: отдельный вход не поддерживается.",
+                                "Your browser may open your current DeepSeek account: separate sign-in is not supported."),
+                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        if (returned) Text(label("Вы вернулись из браузера. Аккаунт SnowSeek через этот способ не подключён.",
-                            "You returned from the browser. This method has not connected a SnowSeek account."), color = MaterialTheme.colorScheme.primary)
+                        if (returned) Text(label("Вход в браузере не подключает аккаунт к SnowSeek.",
+                            "Browser sign-in does not connect an account to SnowSeek."), color = MaterialTheme.colorScheme.onSurfaceVariant)
                         if (failed) Text(label("Не удалось открыть браузер. Проверьте, установлен ли браузер, и повторите попытку.",
                             "Could not open a browser. Check that a browser is installed and try again."), color = MaterialTheme.colorScheme.error)
                         if (waiting) LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -102,14 +102,16 @@ class GoogleSignInActivity : ComponentActivity() {
                             modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp), shape = RoundedCornerShape(18.dp)) {
                             Icon(Icons.AutoMirrored.Outlined.OpenInNew, null)
                             Spacer(Modifier.width(10.dp))
-                            Text(label("Открыть DeepSeek в браузере", "Open DeepSeek in browser"))
+                            Text(label("Открыть в браузере", "Open in browser"))
                         }
                         OutlinedButton(onClick = {
-                            startActivity(Intent(this@GoogleSignInActivity, OfficialWebActivity::class.java)
-                                .putExtra("language", if (russian) "ru" else "en"))
+                            if (!intent.getBooleanExtra(EXTRA_FROM_SIGN_IN, false)) {
+                                startActivity(Intent(this@GoogleSignInActivity, OfficialWebActivity::class.java)
+                                    .putExtra("language", if (russian) "ru" else "en"))
+                            }
                             finish()
                         }, enabled = !waiting, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp), shape = RoundedCornerShape(18.dp)) {
-                            Text(label("Войти через DeepSeek в SnowSeek", "Sign in to SnowSeek with DeepSeek"))
+                            Text(label("Войти в приложении", "Sign in to the app"))
                         }
                     }
                 }
@@ -138,6 +140,11 @@ class GoogleSignInActivity : ComponentActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putBoolean("waiting", waiting)
         outState.putBoolean("returned", returned)
+        outState.putBoolean("auto_open_handled", autoOpenHandled)
         super.onSaveInstanceState(outState)
+    }
+
+    companion object {
+        const val EXTRA_FROM_SIGN_IN = "from_embedded_sign_in"
     }
 }

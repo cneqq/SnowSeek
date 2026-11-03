@@ -23,26 +23,22 @@ import androidx.activity.compose.setContent
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.BugReport
-import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -91,6 +87,7 @@ class OfficialWebActivity : ComponentActivity() {
     private var loading by mutableStateOf(true)
     private var error by mutableStateOf<String?>(null)
     private var confirmLogout by mutableStateOf(false)
+    private var showGoogleChoice by mutableStateOf(false)
     private var clearing by mutableStateOf(false)
     private var connecting by mutableStateOf(false)
     private var sessionCleared by mutableStateOf(false)
@@ -119,6 +116,7 @@ class OfficialWebActivity : ComponentActivity() {
         diagnostics.add(WebDebugTab.WebView, "ACTIVITY_CREATED · remote debugging disabled · no JavaScript bridge")
         savedWebState = savedInstanceState?.getBundle(STATE_WEB)
         styledSignIn = savedInstanceState?.getBoolean("styled_sign_in", true) ?: true
+        showGoogleChoice = savedInstanceState?.getBoolean("google_choice") == true
         savedWebRevision = savedInstanceState?.getLong(STATE_REVISION, -1L) ?: -1L
         setContent {
             val settings by remember {
@@ -249,7 +247,9 @@ class OfficialWebActivity : ComponentActivity() {
             override fun onReceivedError(view: WebView, request: WebResourceRequest, failure: WebResourceError) {
                 diagnostics.add(WebDebugTab.Network, "REQUEST_ERROR nativeCode=${failure.errorCode} ${failure.description} · ${request.method} " +
                     "${DebugRedactor.url(request.url.toString())} · main=${request.isForMainFrame} · HTTP ? (not exposed by onReceivedError)")
-                if (request.isForMainFrame) showLoadError() else resourceErrors++
+                if (request.isForMainFrame) {
+                    if (!GoogleWebSignIn.isEmbeddedOAuthBlocked(request.url.toString())) showLoadError()
+                } else resourceErrors++
             }
 
             override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, response: WebResourceResponse) {
@@ -316,6 +316,7 @@ class OfficialWebActivity : ComponentActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putBoolean("styled_sign_in", styledSignIn)
+        outState.putBoolean("google_choice", showGoogleChoice)
         if (!sessionCleared && loadedRevision >= 0L) {
             webView?.let { view ->
                 val state = Bundle()
@@ -411,10 +412,8 @@ class OfficialWebActivity : ComponentActivity() {
 
     private fun showGoogleRestriction() {
         loading = false
-        error = text(
-            "Для входа через Google вернитесь на экран SnowSeek и выберите «Войти через Google в браузере». Этот способ открывает сайт, но не подключает аккаунт к SnowSeek. Для чатов в приложении войдите здесь по почте или другим доступным способом.",
-            "For Google sign-in, return to the SnowSeek screen and choose Sign in with Google in browser. This opens the website without connecting an account to SnowSeek. For chats in the app, sign in here with email or another available method.",
-        )
+        error = null
+        showGoogleChoice = true
     }
 
     private fun applySignInTheme(view: WebView) {
@@ -423,7 +422,7 @@ class OfficialWebActivity : ComponentActivity() {
     }
 
     private suspend fun connectAccount() {
-        if (connecting || clearing || confirmLogout || sessionCleared) return
+        if (connecting || clearing || confirmLogout || showGoogleChoice || sessionCleared) return
         val view = webView ?: return
         val page = view.url
         fun official() = view.url == page && page?.let {
@@ -446,7 +445,7 @@ class OfficialWebActivity : ComponentActivity() {
             val token = (Json.parseToJsonElement(result) as? JsonPrimitive)?.contentOrNull
                 ?.takeIf { it.isNotBlank() && it != "null" && it.length < 16_384 }
             val connected = sessionConnection.connect(token,
-                current = { !sessionCleared && !clearing && !confirmLogout && webView === view && official() &&
+                current = { !sessionCleared && !clearing && !confirmLogout && !showGoogleChoice && webView === view && official() &&
                     lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) },
                 verify = { received ->
                     connecting = true
@@ -472,68 +471,48 @@ class OfficialWebActivity : ComponentActivity() {
     @Composable
     private fun OfficialScreen() {
         val scope = rememberCoroutineScope()
+        var showMenu by remember { mutableStateOf(false) }
         BackHandler(enabled = !clearing) { navigateBack() }
         BackHandler(enabled = clearing) { /* Wait for session cleanup before leaving. */ }
         Scaffold(topBar = {
             TopAppBar(
-                title = { Text(text("Вход в DeepSeek", "DeepSeek sign-in")) },
+                title = { Text(text("Вход в DeepSeek", "DeepSeek sign-in"), style = MaterialTheme.typography.titleMedium) },
                 navigationIcon = {
                     IconButton(onClick = { navigateBack() }, enabled = !clearing) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, text("Назад", "Back"))
                     }
                 },
                 actions = {
-                    IconButton(onClick = {
-                        styledSignIn = !styledSignIn
-                        webView?.let(::applySignInTheme)
-                    }) {
-                        Icon(Icons.Default.Palette, if (styledSignIn) text("Исходный вид сайта", "Original website appearance")
-                            else text("Стиль SnowSeek", "SnowSeek appearance"))
-                    }
-                    if (BuildConfig.DEBUG) {
-                        IconButton(onClick = { showDiagnostics = true }) {
-                            Icon(Icons.Default.BugReport, text("Отладка WebView", "WebView diagnostics"))
+                    Box {
+                        IconButton(onClick = { showMenu = true }, enabled = !clearing && !connecting) {
+                            Icon(Icons.Default.MoreVert, text("Ещё", "More"))
+                        }
+                        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                            DropdownMenuItem(text = { Text(text("Обновить страницу", "Reload page")) },
+                                enabled = !sessionCleared, onClick = { showMenu = false; reloadPage() })
+                            DropdownMenuItem(text = { Text(if (styledSignIn) text("Исходный вид сайта", "Original website appearance")
+                                else text("Стиль SnowSeek", "SnowSeek appearance")) }, onClick = {
+                                showMenu = false
+                                styledSignIn = !styledSignIn
+                                webView?.let(::applySignInTheme)
+                            })
+                            DropdownMenuItem(text = { Text(text("Выйти из аккаунта", "Sign out")) },
+                                enabled = !sessionCleared, onClick = { showMenu = false; confirmLogout = true })
+                            if (BuildConfig.DEBUG) {
+                                DropdownMenuItem(text = { Text(text("Диагностика", "Diagnostics")) },
+                                    onClick = { showMenu = false; showDiagnostics = true })
+                            }
                         }
                     }
-                    IconButton(onClick = ::reloadPage, enabled = !clearing && !connecting && !sessionCleared) {
-                        Icon(Icons.Default.Refresh, text("Обновить страницу", "Reload page"))
-                    }
-
                 },
             )
         }) { padding ->
             Column(Modifier.fillMaxSize().padding(padding).onSizeChanged { heightController.composeRoot(it.width, it.height) }) {
                 settingsError?.let { Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error) }
-                Text(
-                    text(
-                        "Официальная форма DeepSeek. Войдите по почте или другим доступным способом — после проверки аккаунта SnowSeek откроет ваши чаты.",
-                        "Official DeepSeek form. Sign in with email or another available method — SnowSeek will verify your account and open your chats.",
-                    ),
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                    TextButton(onClick = { confirmLogout = true }, enabled = !clearing && !sessionCleared && !connecting) {
-                        Text(if (clearing) text("Очистка…", "Clearing…") else text("Выйти с сайта", "Sign out of website"))
-                    }
-                    if (connecting) Text(text("Проверяем сессию…", "Verifying session…"), Modifier.padding(12.dp))
-                }
+                if (connecting) Text(text("Подключаем аккаунт…", "Connecting your account…"), Modifier.padding(12.dp),
+                    style = MaterialTheme.typography.bodySmall)
                 if (clearing || connecting) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 else if (loading) LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
-                val currentError = error
-                if (currentError != null) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text(currentError, color = MaterialTheme.colorScheme.error)
-                        if (!sessionCleared) {
-                            Button(onClick = { sessionConnection.retry(); reloadPage() }, enabled = !clearing && !connecting) { Text(text("Повторить", "Retry")) }
-                            TextButton(onClick = { webView?.let { startPage(it, url = SIGN_IN_URL) } }, enabled = !clearing && !connecting) {
-                                Text(text("Открыть страницу входа", "Open sign-in page"))
-                            }
-                        } else {
-                            OutlinedButton(onClick = { finish() }) { Text(text("Закрыть", "Close")) }
-                        }
-                    }
-                }
                 if (!sessionCleared) {
                     Box(Modifier.fillMaxWidth().weight(1f).onSizeChanged { heightController.composeHost(it.width, it.height) }) {
                         AndroidView(
@@ -544,6 +523,34 @@ class OfficialWebActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+        if (showGoogleChoice) {
+            fun stayHere() {
+                showGoogleChoice = false
+                webView?.let { view ->
+                    if (GoogleWebSignIn.isEmbeddedOAuthBlocked(view.url.orEmpty())) startPage(view)
+                }
+            }
+            AlertDialog(onDismissRequest = { stayHere() },
+                title = { Text(text("Открыть Google в браузере?", "Open Google in your browser?")) },
+                text = { Text(text("Этот вход откроет сайт, но не подключит SnowSeek. В браузере может открыться ваш текущий аккаунт DeepSeek.",
+                    "This opens the website without connecting SnowSeek. Your browser may use your current DeepSeek account.")) },
+                confirmButton = { TextButton(onClick = {
+                    stayHere()
+                    startActivity(Intent(this, GoogleSignInActivity::class.java)
+                        .putExtra("language", if (russian) "ru" else "en")
+                        .putExtra(GoogleSignInActivity.EXTRA_FROM_SIGN_IN, true))
+                }) { Text(text("Открыть в браузере", "Open in browser")) } },
+                dismissButton = { TextButton(onClick = { stayHere() }) { Text(text("Остаться здесь", "Stay here")) } })
+        }
+        error?.takeIf { !showGoogleChoice && !confirmLogout && !clearing }?.let { message ->
+            AlertDialog(onDismissRequest = { error = null },
+                title = { Text(text("Не удалось продолжить", "Could not continue")) },
+                text = { Text(message) },
+                confirmButton = { TextButton(onClick = {
+                    if (sessionCleared) finish() else { error = null; sessionConnection.retry(); reloadPage() }
+                }, enabled = !clearing && !connecting) { Text(if (sessionCleared) text("Закрыть", "Close") else text("Повторить", "Retry")) } },
+                dismissButton = { if (!sessionCleared) TextButton(onClick = { error = null }) { Text(text("Отмена", "Cancel")) } })
         }
         if (BuildConfig.DEBUG && showDiagnostics) {
             WebViewDebugPanel(diagnostics, russian, onDismiss = { showDiagnostics = false }, onDomSnapshot = {

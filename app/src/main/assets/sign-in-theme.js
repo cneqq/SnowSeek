@@ -35,13 +35,13 @@
       html[data-snowseek-login], html[data-snowseek-login] body {
         background-color: #10131b !important; color: #e5e9f5; color-scheme: dark;
         --dsw-alias-bg-base: #10131b;
-        --dsw-alias-brand-primary: #a9b9ff;
+        --dsw-alias-brand-primary: #4163eb;
         --dsw-alias-brand-text: #a9b9ff;
         --dsw-alias-label-primary: #e5e9f5;
         --dsw-alias-label-secondary: #a8b0c6;
         --dsw-alias-label-tertiary: #a8b0c6;
         --dsw-alias-label-caption: #a8b0c6;
-        --dsw-alias-label-primary-inverted: #10276e;
+        --dsw-alias-label-primary-inverted: #ffffff;
         --dsw-alias-border-l3: #424b63;
         --dsw-specific-login-input: #242a39;
         --ds-auth-primary-button-radius: 16px;
