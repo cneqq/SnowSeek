@@ -7,7 +7,7 @@
 | Kotlin и стандартная библиотека | Apache-2.0 | https://github.com/JetBrains/kotlin |
 | kotlinx.coroutines | Apache-2.0 | https://github.com/Kotlin/kotlinx.coroutines |
 | kotlinx.serialization | Apache-2.0 | https://github.com/Kotlin/kotlinx.serialization |
-| AndroidX: Compose, Material 3, Activity, Lifecycle, Core, DataStore | Apache-2.0 | https://android.googlesource.com/platform/frameworks/support/ |
+| AndroidX: Compose, Material 3, Activity, Browser, Lifecycle, Core, DataStore | Apache-2.0 | https://android.googlesource.com/platform/frameworks/support/ |
 | Material Icons | Apache-2.0 | https://github.com/google/material-design-icons |
 | Gradle Wrapper | Apache-2.0 | https://github.com/gradle/gradle |
 | JUnit 4 (только тесты) | EPL-1.0 | https://github.com/junit-team/junit4 |

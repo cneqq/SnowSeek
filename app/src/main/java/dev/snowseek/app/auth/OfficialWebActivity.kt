@@ -23,6 +23,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
@@ -79,7 +80,7 @@ import dev.snowseek.app.data.DeepSeekHttpTransport
 import dev.snowseek.core.DeepSeekFailure
 import dev.snowseek.app.BuildConfig
 
-/** User signs in on the official website and explicitly connects their session to SnowSeek. */
+/** Official non-Google website sign-in; verify and connect only this WebView's own session. */
 class OfficialWebActivity : ComponentActivity() {
     private var webView: WebView? = null
     private var savedWebState: Bundle? = null
@@ -104,6 +105,7 @@ class OfficialWebActivity : ComponentActivity() {
     }
     private var showDiagnostics by mutableStateOf(false)
     private var googleOpened = false
+    private val sessionConnection = VerifiedSessionConnection()
     private val russian get() = intent.getStringExtra("language") != "en"
     private fun text(ru: String, en: String) = if (russian) ru else en
 
@@ -131,6 +133,14 @@ class OfficialWebActivity : ComponentActivity() {
             }.collectAsState(initial = AppSettings())
             SnowSeekTheme(settings) {
                 OfficialScreen()
+            }
+        }
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                while (true) {
+                    if (!loading && error == null) connectAccount()
+                    delay(1_200)
+                }
             }
         }
     }
@@ -271,6 +281,7 @@ class OfficialWebActivity : ComponentActivity() {
             try {
                 val revision = WebSession.awaitReady()
                 if (webView !== view || sessionCleared) return@launch
+                sessionConnection.retry()
                 // These operations run consecutively on Main: a new logout cannot interleave.
                 WebSession.attach(view)
                 loadedRevision = revision
@@ -408,44 +419,50 @@ class OfficialWebActivity : ComponentActivity() {
             .putExtra("language", if (russian) "ru" else "en"))
     }
 
-    private fun connectAccount() {
-        if (connecting || clearing || sessionCleared) return
+    private suspend fun connectAccount() {
+        if (connecting || clearing || confirmLogout || sessionCleared) return
         val view = webView ?: return
-        fun official() = view.url?.toUri()?.let { it.scheme == "https" && it.host == "chat.deepseek.com" && it.port in listOf(-1, 443) } == true
-        if (!official()) { error = text("Откройте официальный DeepSeek и войдите в аккаунт.", "Open the official DeepSeek page and sign in."); return }
-        connecting = true
-        lifecycleScope.launch {
-            try {
-                val revision = WebSession.awaitReady()
-                val result = suspendCancellableCoroutine<String> { continuation ->
-                    view.evaluateJavascript("""
-                        (() => { const raw = localStorage.getItem('userToken'); if (!raw) return null;
-                          try { const value = JSON.parse(raw); return typeof value === 'string' ? value :
-                            (value && typeof value.value === 'string' ? value.value : null); }
-                          catch (_) { return raw; } })();
-                    """.trimIndent()) { value -> if (continuation.isActive) continuation.resume(value) }
-                }
-                if (!official() || sessionCleared || WebSession.awaitReady() != revision) throw DeepSeekFailure("Страница входа изменилась. Повторите вход. / Sign-in page changed; retry.")
-                val token = (Json.parseToJsonElement(result) as? JsonPrimitive)?.contentOrNull
-                    ?.takeIf { it.isNotBlank() && it != "null" && it.length < 16_384 }
-                if (token == null) {
-                    // A missing session does not prove a CAPTCHA was presented. Open the actual
-                    // sign-in route instead of reporting a protection challenge that may not exist.
-                    startPage(view, url = SIGN_IN_URL)
-                    return@launch
-                }
-                // Prove native HTTP compatibility before persisting or reporting a connected account.
-                DeepSeekHttpTransport(applicationContext, token).request("/api/v0/users/current")
-                if (sessionCleared || !official() || WebSession.awaitReady() != revision) throw DeepSeekFailure("Вход был отменён. / Sign-in was cancelled.")
-                // Main-thread publication is consecutive with the revision check and logout registration.
-                DeepSeekCredentials.get(applicationContext).save(token)
-                SettingsStore(applicationContext).completeWelcome()
+        val page = view.url
+        fun official() = view.url == page && page?.let {
+            WebNavigationPolicy.classify(it) == NavigationDecision.INTERNAL &&
+                it.toUri().host == GoogleWebSignIn.HOST && it.toUri().path != GoogleWebSignIn.CALLBACK_PATH
+        } == true
+        if (!official()) return
+        try {
+            val revision = WebSession.awaitReady()
+            if (revision != loadedRevision) return
+            val result = withTimeoutOrNull(2_000) { suspendCancellableCoroutine<String> { continuation ->
+                view.evaluateJavascript("""
+                    (() => { const raw = localStorage.getItem('userToken'); if (!raw) return null;
+                      try { const value = JSON.parse(raw); return typeof value === 'string' ? value :
+                        (value && typeof value.value === 'string' ? value.value : null); }
+                      catch (_) { return raw; } })();
+                """.trimIndent()) { value -> if (continuation.isActive) continuation.resume(value) }
+            } } ?: return
+            if (!official() || sessionCleared || WebSession.awaitReady() != revision) throw DeepSeekFailure("Страница входа изменилась. Повторите вход. / Sign-in page changed; retry.")
+            val token = (Json.parseToJsonElement(result) as? JsonPrimitive)?.contentOrNull
+                ?.takeIf { it.isNotBlank() && it != "null" && it.length < 16_384 }
+            val connected = sessionConnection.connect(token,
+                current = { !sessionCleared && !clearing && !confirmLogout && webView === view && official() &&
+                    lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) },
+                verify = { received ->
+                    connecting = true
+                    DeepSeekHttpTransport(applicationContext, received).request("/api/v0/users/current").jsonObject
+                    // Finish suspending setup before publishing credentials; after save, navigation
+                    // must be consecutive on Main so pause/logout cannot strand a completed attempt.
+                    SettingsStore(applicationContext).completeWelcome()
+                    if (WebSession.awaitReady() != revision) throw CancellationException("Session changed")
+                },
+                save = { DeepSeekCredentials.get(applicationContext).save(it) })
+            if (connected) {
+                startActivity(Intent(this, dev.snowseek.app.MainActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP))
                 finish()
-            } catch (cancelled: CancellationException) { throw cancelled }
-            catch (failure: Exception) {
-                error = (failure as? DeepSeekFailure)?.message ?: text("Не удалось сохранить подключение. Повторите вход.", "Connection could not be saved; sign in again.")
-            } finally { connecting = false }
-        }
+            }
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (failure: Exception) {
+            error = (failure as? DeepSeekFailure)?.message ?: text("Не удалось сохранить подключение. Повторите вход.", "Connection could not be saved; sign in again.")
+        } finally { connecting = false }
     }
 
     @OptIn(ExperimentalMaterial3Api::class)
@@ -483,8 +500,8 @@ class OfficialWebActivity : ComponentActivity() {
                 settingsError?.let { Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error) }
                 Text(
                     text(
-                        "Войдите на официальном сайте, затем нажмите «Подключить SnowSeek» для нативного чата. Пароль остаётся на сайте.",
-                        "Sign in on the official website, then tap Connect SnowSeek for native chat. Your password stays on the website.",
+                        "Войдите на официальном сайте. SnowSeek автоматически проверит и сохранит сессию для нативного чата. Google-вход доступен отдельно в браузере и остаётся на сайте.",
+                        "Sign in on the official website. SnowSeek automatically verifies and saves this session for native chat. Google sign-in opens separately in a browser and stays on the website.",
                     ),
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                     style = MaterialTheme.typography.bodySmall,
@@ -493,22 +510,20 @@ class OfficialWebActivity : ComponentActivity() {
                     TextButton(onClick = { confirmLogout = true }, enabled = !clearing && !sessionCleared && !connecting) {
                         Text(if (clearing) text("Очистка…", "Clearing…") else text("Выйти с сайта", "Sign out of website"))
                     }
-                    Button(onClick = ::connectAccount, enabled = !loading && !clearing && !connecting && !sessionCleared) {
-                        Text(if (connecting) text("Проверка…", "Checking…") else text("Подключить SnowSeek", "Connect SnowSeek"))
-                    }
+                    if (connecting) Text(text("Проверяем сессию…", "Verifying session…"), Modifier.padding(12.dp))
                 }
                 TextButton(onClick = { openGoogleSignIn() }, enabled = !clearing && !connecting && !sessionCleared,
                     modifier = Modifier.padding(horizontal = 16.dp)) {
-                    Text(text("Настроить вход через Google", "Set up Google sign-in"))
+                    Text(text("Google — на сайте DeepSeek", "Google — on the DeepSeek website"))
                 }
-                if (clearing) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                if (clearing || connecting) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 else if (loading) LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
                 val currentError = error
                 if (currentError != null) {
                     Column(Modifier.padding(16.dp)) {
                         Text(currentError, color = MaterialTheme.colorScheme.error)
                         if (!sessionCleared) {
-                            Button(onClick = ::reloadPage, enabled = !clearing && !connecting) { Text(text("Повторить", "Retry")) }
+                            Button(onClick = { sessionConnection.retry(); reloadPage() }, enabled = !clearing && !connecting) { Text(text("Повторить", "Retry")) }
                             TextButton(onClick = { webView?.let { startPage(it, url = SIGN_IN_URL) } }, enabled = !clearing && !connecting) {
                                 Text(text("Открыть страницу входа", "Open sign-in page"))
                             }

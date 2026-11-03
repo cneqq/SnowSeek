@@ -32,7 +32,6 @@ object WebSession {
         // Register cleanup on Main, the same dispatcher used by attach and page loading.
         withContext(NonCancellable + Dispatchers.Main.immediate) {
             cleanup.clear {
-                GoogleBrowserAttempt.cancel(appContext)
                 withContext(Dispatchers.IO) { DeepSeekCredentials.get(appContext).clear() }
                 // Prevent live pages from recreating credentials during cookie removal.
                 activeViews.toList().forEach { view ->
