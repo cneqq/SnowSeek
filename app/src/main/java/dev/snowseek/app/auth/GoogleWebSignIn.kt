@@ -10,6 +10,13 @@ object GoogleWebSignIn {
     private const val AUTHORIZE_PATH = "/api/v0/users/oauth/google/authorize"
     class Callback(val nonce: String) { override fun toString() = "GoogleCallback([redacted])" }
 
+    /** Google policy forbids embedded OAuth; recognize it before requesting any login page. */
+    fun isEmbeddedOAuthBlocked(raw: String): Boolean {
+        val uri = try { URI(raw) } catch (_: Exception) { return false }
+        return uri.host.equals("accounts.google.com", ignoreCase = true) ||
+            (uri.host.equals(HOST, ignoreCase = true) && uri.path?.trimEnd('/') == AUTHORIZE_PATH)
+    }
+
     private fun official(raw: String): URI? {
         if (raw.length > 32_768 || WebNavigationPolicy.classify(raw) != NavigationDecision.INTERNAL) return null
         val uri = try { URI(raw) } catch (_: Exception) { return null }

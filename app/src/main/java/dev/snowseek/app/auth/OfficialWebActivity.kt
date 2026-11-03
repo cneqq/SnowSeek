@@ -1,7 +1,6 @@
 package dev.snowseek.app.auth
 
 import android.annotation.SuppressLint
-import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.graphics.Bitmap
 import androidx.core.net.toUri
@@ -33,7 +32,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material3.AlertDialog
@@ -90,7 +88,6 @@ class OfficialWebActivity : ComponentActivity() {
     private var progress by mutableFloatStateOf(0f)
     private var loading by mutableStateOf(true)
     private var error by mutableStateOf<String?>(null)
-    private var externalUrl by mutableStateOf<String?>(null)
     private var confirmLogout by mutableStateOf(false)
     private var clearing by mutableStateOf(false)
     private var connecting by mutableStateOf(false)
@@ -104,7 +101,6 @@ class OfficialWebActivity : ComponentActivity() {
         domDiagnostics.capture("height-correction-result")
     }
     private var showDiagnostics by mutableStateOf(false)
-    private var googleOpened = false
     private val sessionConnection = VerifiedSessionConnection()
     private val russian get() = intent.getStringExtra("language") != "en"
     private fun text(ru: String, en: String) = if (russian) ru else en
@@ -167,9 +163,8 @@ class OfficialWebActivity : ComponentActivity() {
         CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
         webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-                if (request.isForMainFrame && GoogleWebSignIn.isAuthorizeUrl(request.url.toString()) &&
-                    view.url?.toUri()?.host == GoogleWebSignIn.HOST && !clearing && !sessionCleared) {
-                    openGoogleSignIn(request.url.toString())
+                if (GoogleWebSignIn.isEmbeddedOAuthBlocked(request.url.toString())) {
+                    if (request.isForMainFrame) showGoogleRestriction()
                     return true
                 }
                 val decision = WebNavigationPolicy.classify(request.url.toString())
@@ -177,10 +172,10 @@ class OfficialWebActivity : ComponentActivity() {
                 diagnostics.add(WebDebugTab.WebView, "NAVIGATION ${request.method} ${DebugRedactor.url(request.url.toString())} · " +
                     "main=${request.isForMainFrame} redirect=${request.isRedirect} gesture=${request.hasGesture()} · " +
                     if (allowed) "ALLOW" else "INTERCEPT $decision")
-                // CAPTCHA may embed a third-party HTTPS frame; only top-level pages leave the app.
+                // CAPTCHA may embed a third-party HTTPS frame; external top-level sign-in stays blocked.
                 if (allowed) return false
                 if (request.isForMainFrame) {
-                    if (decision == NavigationDecision.EXTERNAL_BROWSER) externalUrl = request.url.toString()
+                    if (decision == NavigationDecision.EXTERNAL_BROWSER) error = text("Этот переход требует внешнего сайта. Для входа внутри SnowSeek выберите другой способ на форме DeepSeek.", "This link requires an external website. Choose another method on the DeepSeek form to sign in inside SnowSeek.")
                     else error = text("Небезопасный переход заблокирован.", "Unsafe navigation was blocked.")
                 }
                 return true
@@ -199,6 +194,11 @@ class OfficialWebActivity : ComponentActivity() {
                 domDiagnostics.pageStarted(view)
                 diagnostics.location(url, 0)
                 diagnostics.add(WebDebugTab.WebView, "PAGE_STARTED ${DebugRedactor.url(url)}")
+                if (url != null && GoogleWebSignIn.isEmbeddedOAuthBlocked(url)) {
+                    view.stopLoading()
+                    showGoogleRestriction()
+                    return
+                }
                 if (url != null && WebNavigationPolicy.classify(url) != NavigationDecision.INTERNAL) {
                     view.stopLoading()
                     if (url != "about:blank") error = text("Переход заблокирован.", "Navigation was blocked.")
@@ -322,8 +322,8 @@ class OfficialWebActivity : ComponentActivity() {
     private fun showLoadError() {
         loading = false
         error = text(
-            "Страница не загрузилась. Проверьте сеть и повторите попытку. Для входа также можно открыть браузер.",
-            "The page could not load. Check your connection and retry, or use your browser to sign in.",
+            "Страница не загрузилась. Проверьте сеть и повторите попытку. Вход выполняется внутри SnowSeek.",
+            "The page could not load. Check your connection and retry, sign-in stays inside SnowSeek.",
         )
     }
 
@@ -401,22 +401,12 @@ class OfficialWebActivity : ComponentActivity() {
         if (view != null && view.canGoBack() && !sessionCleared) view.goBack() else finish()
     }
 
-    private fun openBrowser(url: String) {
-        if (WebNavigationPolicy.classify(url) == NavigationDecision.BLOCKED) return
-        try {
-            startActivity(Intent(Intent.ACTION_VIEW, url.toUri()).addCategory(Intent.CATEGORY_BROWSABLE))
-        } catch (_: ActivityNotFoundException) {
-            error = text("Браузер не найден.", "No browser is available.")
-        } catch (_: SecurityException) {
-            error = text("Не удалось открыть браузер.", "The browser could not be opened.")
-        }
-    }
-
-    private fun openGoogleSignIn(authorizeUrl: String? = null) {
-        googleOpened = true
-        startActivity(Intent(this, GoogleSignInActivity::class.java)
-            .putExtra(GoogleSignInActivity.EXTRA_START_URL, authorizeUrl)
-            .putExtra("language", if (russian) "ru" else "en"))
+    private fun showGoogleRestriction() {
+        loading = false
+        error = text(
+            "Google запрещает авторизацию во встроенном Android WebView (disallowed_useragent). Вернитесь к форме DeepSeek и используйте другой доступный способ, например вход по электронной почте. Браузер не открывался.",
+            "Google disallows sign-in in embedded Android WebViews (disallowed_useragent). Return to the DeepSeek form and use another available method, such as email. No browser was opened.",
+        )
     }
 
     private suspend fun connectAccount() {
@@ -488,11 +478,7 @@ class OfficialWebActivity : ComponentActivity() {
                     IconButton(onClick = ::reloadPage, enabled = !clearing && !connecting && !sessionCleared) {
                         Icon(Icons.Default.Refresh, text("Обновить страницу", "Reload page"))
                     }
-                    IconButton(onClick = { externalUrl = webView?.url?.takeIf {
-                        WebNavigationPolicy.classify(it) == NavigationDecision.INTERNAL
-                    } ?: OFFICIAL_URL }, enabled = !clearing) {
-                        Icon(Icons.Default.OpenInBrowser, text("Открыть в браузере", "Open in browser"))
-                    }
+
                 },
             )
         }) { padding ->
@@ -500,8 +486,8 @@ class OfficialWebActivity : ComponentActivity() {
                 settingsError?.let { Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error) }
                 Text(
                     text(
-                        "Войдите на официальном сайте. SnowSeek автоматически проверит и сохранит сессию для нативного чата. Google-вход доступен отдельно в браузере и остаётся на сайте.",
-                        "Sign in on the official website. SnowSeek automatically verifies and saves this session for native chat. Google sign-in opens separately in a browser and stays on the website.",
+                        "Войдите на официальном сайте. SnowSeek автоматически проверит и сохранит сессию для нативного чата. Google запрещает вход во встроенном WebView; выберите другой доступный способ.",
+                        "Sign in on the official website. SnowSeek automatically verifies and saves this session for native chat. Google disallows sign-in in embedded WebViews; choose another available method.",
                     ),
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                     style = MaterialTheme.typography.bodySmall,
@@ -511,10 +497,6 @@ class OfficialWebActivity : ComponentActivity() {
                         Text(if (clearing) text("Очистка…", "Clearing…") else text("Выйти с сайта", "Sign out of website"))
                     }
                     if (connecting) Text(text("Проверяем сессию…", "Verifying session…"), Modifier.padding(12.dp))
-                }
-                TextButton(onClick = { openGoogleSignIn() }, enabled = !clearing && !connecting && !sessionCleared,
-                    modifier = Modifier.padding(horizontal = 16.dp)) {
-                    Text(text("Google — на сайте DeepSeek", "Google — on the DeepSeek website"))
                 }
                 if (clearing || connecting) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 else if (loading) LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
@@ -549,23 +531,11 @@ class OfficialWebActivity : ComponentActivity() {
                 domDiagnostics.capture()
             })
         }
-        externalUrl?.let { target ->
-            AlertDialog(
-                onDismissRequest = { externalUrl = null },
-                title = { Text(text("Открыть браузер?", "Open browser?")) },
-                text = { Text(text(
-                    "Сайт ${target.toUri().host}. Сессия браузера отдельная: вход в браузере не переносится обратно в приложение.",
-                    "Website: ${target.toUri().host}. Browser sessions are separate: signing in there does not sign you in inside this app.",
-                )) },
-                confirmButton = { TextButton(onClick = { externalUrl = null; openBrowser(target) }) { Text(text("Открыть", "Open")) } },
-                dismissButton = { TextButton(onClick = { externalUrl = null }) { Text(text("Отмена", "Cancel")) } },
-            )
-        }
         if (confirmLogout) {
             AlertDialog(
                 onDismissRequest = { confirmLogout = false },
                 title = { Text(text("Выйти с сайта?", "Sign out of website?")) },
-                text = { Text(text("Cookies, хранилище и кэш сайта будут очищены на устройстве. Сессия внешнего браузера сохранится.", "Website cookies, storage and cache will be cleared on this device. External browser sessions are separate.")) },
+                text = { Text(text("Cookies, хранилище и кэш сайта будут очищены на устройстве. Вход потребуется повторить.", "Website cookies, storage and cache will be cleared on this device. You will need to sign in again.")) },
                 confirmButton = {
                     TextButton(onClick = {
                         confirmLogout = false
@@ -593,12 +563,7 @@ class OfficialWebActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         webView?.onResume()
-        if (googleOpened) {
-            googleOpened = false
-            // The official button entered its loading state before handing off. Start a fresh
-            // page on cancellation/setup return, without clearing website cookies or storage.
-            webView?.let { if (!sessionCleared && !clearing) startPage(it, url = SIGN_IN_URL) }
-        }
+
     }
 
     override fun onPause() {

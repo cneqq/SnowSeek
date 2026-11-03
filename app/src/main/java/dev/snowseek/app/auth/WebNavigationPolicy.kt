@@ -9,6 +9,7 @@ enum class NavigationDecision { INTERNAL, EXTERNAL_BROWSER, BLOCKED }
 /** External HTTPS URLs require explicit browser confirmation; they never load in WebView. */
 object WebNavigationPolicy {
     fun mayLoadInWebView(url: String, isMainFrame: Boolean): Boolean {
+        if (GoogleWebSignIn.isEmbeddedOAuthBlocked(url)) return false
         if (!isMainFrame && (url == "about:blank" || isHttpsBlob(url))) return true
         return when (classify(url)) {
         NavigationDecision.INTERNAL -> true
@@ -18,8 +19,8 @@ object WebNavigationPolicy {
     }
 
     /** Embedded resources are not top-level navigation. WebView applies origin isolation and CSP. */
-    fun mayLoadResource(url: String): Boolean = url == "about:blank" ||
-        url.startsWith("data:", ignoreCase = true) || isHttpsBlob(url) || classify(url) != NavigationDecision.BLOCKED
+    fun mayLoadResource(url: String): Boolean = !GoogleWebSignIn.isEmbeddedOAuthBlocked(url) &&
+        (url == "about:blank" || url.startsWith("data:", ignoreCase = true) || isHttpsBlob(url) || classify(url) != NavigationDecision.BLOCKED)
 
     private fun isHttpsBlob(url: String): Boolean = url.startsWith("blob:", ignoreCase = true) &&
         classify(url.substring(5)) != NavigationDecision.BLOCKED

@@ -44,7 +44,6 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.snowseek.app.BuildConfig
 import dev.snowseek.app.auth.OfficialWebActivity
-import dev.snowseek.app.auth.GoogleSignInActivity
 import dev.snowseek.app.settings.AppSettings
 import dev.snowseek.app.settings.ThemeMode
 import dev.snowseek.app.ui.components.MessageCard
@@ -71,10 +70,7 @@ fun SnowSeekApp(model: SnowSeekViewModel) {
                 if (!settingsReady) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
                 } else if (!settings.welcomeComplete && ui.isDemo) {
-                    WelcomeScreen(onContinue = model::welcomeComplete, onWeb = openWeb, onGoogle = {
-                        context.startActivity(Intent(context, GoogleSignInActivity::class.java)
-                            .putExtra("language", settings.language).putExtra(GoogleSignInActivity.EXTRA_OPEN_BROWSER, true))
-                    }, language = model::language)
+                    WelcomeScreen(onContinue = model::welcomeComplete, onWeb = openWeb, language = model::language)
                 } else if (showSettings) {
                     BackHandler { showSettings = false }
                     SettingsScreen(settings, model, { showSettings = false }, openWeb)
@@ -114,7 +110,7 @@ fun SnowSeekApp(model: SnowSeekViewModel) {
 }
 
 @Composable
-private fun WelcomeScreen(onContinue: () -> Unit, onWeb: () -> Unit, onGoogle: () -> Unit, language: (String) -> Unit) {
+private fun WelcomeScreen(onContinue: () -> Unit, onWeb: () -> Unit, language: (String) -> Unit) {
     val w = LocalWords.current
     Column(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 28.dp).verticalScrollCompat(),
         horizontalAlignment = Alignment.CenterHorizontally) {
@@ -135,18 +131,16 @@ private fun WelcomeScreen(onContinue: () -> Unit, onWeb: () -> Unit, onGoogle: (
             Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
                 WelcomeFeature(Icons.Outlined.Forum, w.text("Нативный чат", "Native conversation"), w.text("Потоковые ответы и история на устройстве", "Streaming replies and on-device history"))
                 WelcomeFeature(Icons.Outlined.Shield, w.text("Ваше пространство", "Your space"), w.text("Без рекламы, трекеров и посредников", "No ads, trackers or intermediary servers"))
-                WelcomeFeature(Icons.Outlined.Science, w.text("Бесплатный аккаунт", "Free web account"), w.text("Google — веб-чаты; другой способ входа — нативные чаты", "Google for web chats; another sign-in method for native chats"))
+                WelcomeFeature(Icons.Outlined.Science, w.text("Бесплатный аккаунт", "Free web account"), w.text("Вход на официальном сайте внутри SnowSeek", "Sign in on the official website inside SnowSeek"))
             }
         }
         Spacer(Modifier.height(32.dp))
-        Button(onClick = onGoogle, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp), shape = RoundedCornerShape(18.dp)) {
-            Text(w.text("Войти через Google", "Sign in with Google")); Spacer(Modifier.width(12.dp)); Icon(Icons.AutoMirrored.Outlined.ArrowForward, null)
+        Button(onClick = onWeb, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp), shape = RoundedCornerShape(18.dp)) {
+            Text(w.text("Войти", "Sign in")); Spacer(Modifier.width(12.dp)); Icon(Icons.AutoMirrored.Outlined.ArrowForward, null)
         }
-        Text(w.text("Google-вход откроется на сайте DeepSeek; сессия останется в браузере.", "Google sign-in opens on the DeepSeek website; the session stays in your browser."),
+        Text(w.text("Официальная форма DeepSeek откроется внутри приложения. Google запрещает вход во встроенном WebView; используйте другой доступный способ на сайте.",
+            "The official DeepSeek form opens inside the app. Google disallows sign-in in embedded WebViews; use another available method on the website."),
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        OutlinedButton(onClick = onWeb, modifier = Modifier.fillMaxWidth().padding(top = 12.dp).heightIn(min = 48.dp)) {
-            Text(w.text("Другой способ для нативного чата", "Another method for native chat"))
-        }
         TextButton(onClick = onContinue, modifier = Modifier.padding(top = 8.dp)) { Text(w.text("Попробовать демочат", "Try the demo")) }
         Spacer(Modifier.height(24.dp))
         Text(w.text("Неофициальный открытый клиент. Сессия сайта внутри приложения проверяется и сохраняется автоматически. Веб-интеграция экспериментальная.", "Unofficial open-source client. Website sessions inside the app are verified and saved automatically. Web integration is experimental."),
