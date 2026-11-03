@@ -34,6 +34,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -62,6 +63,7 @@ import java.io.ByteArrayInputStream
 import java.io.IOException
 import dev.snowseek.app.settings.AppSettings
 import dev.snowseek.app.settings.SettingsStore
+import dev.snowseek.app.settings.ThemeMode
 import dev.snowseek.app.ui.theme.SnowSeekTheme
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
@@ -101,6 +103,8 @@ class OfficialWebActivity : ComponentActivity() {
         domDiagnostics.capture("height-correction-result")
     }
     private var showDiagnostics by mutableStateOf(false)
+    private var styledSignIn by mutableStateOf(true)
+    private val signInTheme by lazy { assets.open("sign-in-theme.js").bufferedReader().use { it.readText() } }
     private val sessionConnection = VerifiedSessionConnection()
     private val russian get() = intent.getStringExtra("language") != "en"
     private fun text(ru: String, en: String) = if (russian) ru else en
@@ -114,6 +118,7 @@ class OfficialWebActivity : ComponentActivity() {
             "WebView ${engine?.packageName ?: "unknown"} ${engine?.versionName ?: "unknown"}")
         diagnostics.add(WebDebugTab.WebView, "ACTIVITY_CREATED · remote debugging disabled · no JavaScript bridge")
         savedWebState = savedInstanceState?.getBundle(STATE_WEB)
+        styledSignIn = savedInstanceState?.getBoolean("styled_sign_in", true) ?: true
         savedWebRevision = savedInstanceState?.getLong(STATE_REVISION, -1L) ?: -1L
         setContent {
             val settings by remember {
@@ -127,7 +132,7 @@ class OfficialWebActivity : ComponentActivity() {
                         } else false
                     }
             }.collectAsState(initial = AppSettings())
-            SnowSeekTheme(settings) {
+            SnowSeekTheme(settings.copy(theme = ThemeMode.DARK)) {
                 OfficialScreen()
             }
         }
@@ -221,6 +226,7 @@ class OfficialWebActivity : ComponentActivity() {
                 checkPageContent(view, url)
                 domDiagnostics.pageReady()
                 heightController.check()
+                applySignInTheme(view)
             }
 
             override fun onPageCommitVisible(view: WebView, url: String?) {
@@ -233,6 +239,7 @@ class OfficialWebActivity : ComponentActivity() {
                 diagnostics.location(url)
                 diagnostics.add(WebDebugTab.WebView, "HISTORY_UPDATED reload=$isReload ${DebugRedactor.url(url)}")
                 heightController.check("navigation")
+                applySignInTheme(view)
             }
 
             override fun onLoadResource(view: WebView, url: String?) {
@@ -308,6 +315,7 @@ class OfficialWebActivity : ComponentActivity() {
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean("styled_sign_in", styledSignIn)
         if (!sessionCleared && loadedRevision >= 0L) {
             webView?.let { view ->
                 val state = Bundle()
@@ -404,9 +412,14 @@ class OfficialWebActivity : ComponentActivity() {
     private fun showGoogleRestriction() {
         loading = false
         error = text(
-            "Google запрещает авторизацию во встроенном Android WebView (disallowed_useragent). Вернитесь к форме DeepSeek и используйте другой доступный способ, например вход по электронной почте. Браузер не открывался.",
-            "Google disallows sign-in in embedded Android WebViews (disallowed_useragent). Return to the DeepSeek form and use another available method, such as email. No browser was opened.",
+            "Для входа через Google вернитесь на экран SnowSeek и выберите «Войти через Google в браузере». Этот способ открывает сайт, но не подключает аккаунт к SnowSeek. Для чатов в приложении войдите здесь по почте или другим доступным способом.",
+            "For Google sign-in, return to the SnowSeek screen and choose Sign in with Google in browser. This opens the website without connecting an account to SnowSeek. For chats in the app, sign in here with email or another available method.",
         )
+    }
+
+    private fun applySignInTheme(view: WebView) {
+        if (view.url?.toUri()?.let { it.scheme == "https" && it.host == GoogleWebSignIn.HOST } != true) return
+        view.evaluateJavascript("$signInTheme\nwindow.__snowseekSignInTheme && window.__snowseekSignInTheme($styledSignIn);", null)
     }
 
     private suspend fun connectAccount() {
@@ -463,13 +476,20 @@ class OfficialWebActivity : ComponentActivity() {
         BackHandler(enabled = clearing) { /* Wait for session cleanup before leaving. */ }
         Scaffold(topBar = {
             TopAppBar(
-                title = { Text("DeepSeek") },
+                title = { Text(text("Вход в DeepSeek", "DeepSeek sign-in")) },
                 navigationIcon = {
                     IconButton(onClick = { navigateBack() }, enabled = !clearing) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, text("Назад", "Back"))
                     }
                 },
                 actions = {
+                    IconButton(onClick = {
+                        styledSignIn = !styledSignIn
+                        webView?.let(::applySignInTheme)
+                    }) {
+                        Icon(Icons.Default.Palette, if (styledSignIn) text("Исходный вид сайта", "Original website appearance")
+                            else text("Стиль SnowSeek", "SnowSeek appearance"))
+                    }
                     if (BuildConfig.DEBUG) {
                         IconButton(onClick = { showDiagnostics = true }) {
                             Icon(Icons.Default.BugReport, text("Отладка WebView", "WebView diagnostics"))
@@ -486,8 +506,8 @@ class OfficialWebActivity : ComponentActivity() {
                 settingsError?.let { Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error) }
                 Text(
                     text(
-                        "Войдите на официальном сайте. SnowSeek автоматически проверит и сохранит сессию для нативного чата. Google запрещает вход во встроенном WebView; выберите другой доступный способ.",
-                        "Sign in on the official website. SnowSeek automatically verifies and saves this session for native chat. Google disallows sign-in in embedded WebViews; choose another available method.",
+                        "Официальная форма DeepSeek. Войдите по почте или другим доступным способом — после проверки аккаунта SnowSeek откроет ваши чаты.",
+                        "Official DeepSeek form. Sign in with email or another available method — SnowSeek will verify your account and open your chats.",
                     ),
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                     style = MaterialTheme.typography.bodySmall,

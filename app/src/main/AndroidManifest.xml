@@ -4,6 +4,9 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <queries>
         <intent>
+            <action android:name="android.support.customtabs.action.CustomTabsService" />
+        </intent>
+        <intent>
             <action android:name="android.intent.action.VIEW" />
             <category android:name="android.intent.category.BROWSABLE" />
             <data android:scheme="https" />
@@ -15,6 +18,7 @@
         android:label="SnowSeek" android:supportsRtl="true"
         android:usesCleartextTraffic="false" android:theme="@style/Theme.SnowSeek">
         <activity android:name=".auth.OfficialWebActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
+        <activity android:name=".auth.GoogleSignInActivity" android:exported="false" />
         <activity android:name=".MainActivity" android:exported="true" android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
