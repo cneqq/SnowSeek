@@ -37,6 +37,10 @@ object GoogleWebSignIn {
         return q["os"] == "web" && q.keys.all { it in setOf("os", "device_id", "shumei_verification", "hcaptcha_token") }
     }
 
+    /** Only an official top-level navigation can initiate the browser/native exchange. */
+    fun shouldHandoff(raw: String, source: String?, isMainFrame: Boolean): Boolean =
+        isMainFrame && source?.let(::official) != null && isAuthorizeUrl(raw)
+
     fun parseCallback(raw: String): Callback? {
         val uri = official(raw) ?: return null
         if (uri.rawPath != CALLBACK_PATH) return null

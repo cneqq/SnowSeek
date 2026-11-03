@@ -1,150 +1,175 @@
 package dev.snowseek.app.auth
 
-import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.pm.verify.domain.DomainVerificationManager
+import android.content.pm.verify.domain.DomainVerificationUserState
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.browser.customtabs.CustomTabColorSchemeParams
-import androidx.browser.customtabs.CustomTabsClient
-import androidx.browser.customtabs.CustomTabsIntent
+import androidx.core.net.toUri
+import androidx.lifecycle.ViewModelProvider
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
-import androidx.core.net.toUri
+import dev.snowseek.app.MainActivity
 import dev.snowseek.app.settings.AppSettings
+import dev.snowseek.app.settings.SettingsStore
 import dev.snowseek.app.settings.ThemeMode
-import dev.snowseek.app.ui.BrandMark
 import dev.snowseek.app.ui.theme.SnowSeekTheme
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
-/** Website-only browser access. No OAuth receiver, cookie access or native account activation. */
 class GoogleSignInActivity : ComponentActivity() {
-    private data class BrowserPlan(val provider: String?, val isolated: Boolean)
-    private var plan by mutableStateOf<BrowserPlan?>(null)
-    private var waiting by mutableStateOf(false)
-    private var returned by mutableStateOf(false)
-    private var failed by mutableStateOf(false)
-    private var autoOpenHandled = false
+    private lateinit var model: GoogleSignInModel
+    private var returnApproved by mutableStateOf<Boolean?>(null)
     private val russian get() = intent.getStringExtra("language") != "en"
     private fun label(ru: String, en: String) = if (russian) ru else en
-    private val browser = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-        // Neither closing a tab nor RESULT_OK proves an authenticated SnowSeek session.
-        waiting = false
-        returned = true
-        if (intent.getBooleanExtra(EXTRA_FROM_SIGN_IN, false)) finish()
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        waiting = savedInstanceState?.getBoolean("waiting") == true
-        returned = savedInstanceState?.getBoolean("returned") == true
-        autoOpenHandled = savedInstanceState?.getBoolean("auto_open_handled") == true
+        val incoming = intent.dataString
+        if (intent.action == Intent.ACTION_VIEW && incoming != null && GoogleWebSignIn.shouldReturnToBrowser(incoming)) {
+            // Android intent filters cannot distinguish query providers. Delegate other providers
+            // back to the browser explicitly, without claiming/cancelling a Google attempt.
+            intent = Intent(this, GoogleSignInActivity::class.java)
+            forwardOtherProvider(incoming)
+            return
+        }
+        model = ViewModelProvider(this)[GoogleSignInModel::class.java]
+        val language = intent.getStringExtra("language")
+        if (intent.action == Intent.ACTION_VIEW) model.receive(intent.dataString)
+        else model.prepare(intent.getStringExtra(EXTRA_START_URL))
+        // Never keep callback nonces or verification URLs in activity instance state.
+        intent = Intent(this, GoogleSignInActivity::class.java).putExtra("language", language)
         setContent {
-            SnowSeekTheme(AppSettings(theme = ThemeMode.DARK)) {
-                val toolbarColor = MaterialTheme.colorScheme.surface.toArgb()
-                LaunchedEffect(Unit) {
-                    plan = withContext(Dispatchers.IO) {
-                        try {
-                            val provider = CustomTabsClient.getPackageName(this@GoogleSignInActivity, null)
-                            BrowserPlan(provider, provider != null &&
-                                CustomTabsClient.isEphemeralBrowsingSupported(this@GoogleSignInActivity, provider))
-                        } catch (_: SecurityException) { BrowserPlan(null, false) }
-                    }
-                    // The embedded form already presented the explanation and browser action.
-                    if (intent.getBooleanExtra(EXTRA_FROM_SIGN_IN, false) && !autoOpenHandled) {
-                        autoOpenHandled = true
-                        plan?.let { openBrowser(it, toolbarColor) }
-                    }
-                }
-                Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    Column(Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp),
-                        verticalArrangement = Arrangement.spacedBy(20.dp)) {
-                        TextButton(onClick = { finish() }) { Text(label("Назад", "Back")) }
-                        BrandMark(64)
-                        Text(label("Google в браузере", "Google in your browser"), style = MaterialTheme.typography.headlineMedium)
-                        Text(label("На сайте DeepSeek выберите Google. Чаты откроются в браузере, а не в SnowSeek.",
-                            "Choose Google on the DeepSeek website. Your chats will open in the browser, not in SnowSeek."))
-                        Text(label("Для чатов в приложении войдите через DeepSeek по почте.",
-                            "For chats in the app, sign in to DeepSeek with email."),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        val currentPlan = plan
-                        if (currentPlan == null) {
-                            LinearProgressIndicator(Modifier.fillMaxWidth())
-                            Text(label("Готовим браузер…", "Preparing browser…"))
-                        } else {
-                            Text(if (currentPlan.isolated) label(
-                                "Запросим отдельную временную вкладку для нового входа.",
-                                "We will request a separate temporary tab for a fresh sign-in.")
-                            else label(
-                                "Браузер может открыть текущий аккаунт DeepSeek: отдельный вход не поддерживается.",
-                                "Your browser may open your current DeepSeek account: separate sign-in is not supported."),
-                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            val settings by remember { SettingsStore(applicationContext).settings }.collectAsState(initial = AppSettings())
+            SnowSeekTheme(settings.copy(theme = ThemeMode.DARK)) { Screen() }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        val raw = intent.dataString
+        val language = this.intent.getStringExtra("language")
+        this.intent = Intent(this, GoogleSignInActivity::class.java).putExtra("language", language)
+        if (intent.action == Intent.ACTION_VIEW && raw != null) {
+            if (GoogleWebSignIn.shouldReturnToBrowser(raw)) forwardOtherProvider(raw)
+            else model.receive(raw)
+        }
+    }
+
+    private fun forwardOtherProvider(url: String) {
+        try { openBrowser(url) }
+        catch (_: Exception) { Toast.makeText(this, label("Откройте результат входа в обычном браузере.", "Open the sign-in result in your browser."), Toast.LENGTH_LONG).show() }
+        finally { finish() }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        returnApproved = approved()
+    }
+
+    private fun approved(): Boolean? {
+        if (Build.VERSION.SDK_INT < 31) return true // Older Android can show its link-handler chooser.
+        return try {
+            val state = getSystemService(DomainVerificationManager::class.java).getDomainVerificationUserState(packageName) ?: return null
+            state.isLinkHandlingAllowed && state.hostToStateMap[GoogleWebSignIn.HOST] in setOf(
+                DomainVerificationUserState.DOMAIN_STATE_VERIFIED, DomainVerificationUserState.DOMAIN_STATE_SELECTED,
+            )
+        } catch (_: Exception) { null }
+    }
+
+    private fun returnSettings() {
+        val action = if (Build.VERSION.SDK_INT >= 31) Settings.ACTION_APP_OPEN_BY_DEFAULT_SETTINGS else Settings.ACTION_APPLICATION_DETAILS_SETTINGS
+        try { startActivity(Intent(action, "package:$packageName".toUri())) }
+        catch (_: Exception) { returnApproved = null }
+    }
+
+    private fun openBrowser(url: String) {
+        // Resolve the ordinary default browser against an unrelated public origin without
+        // visiting it, so DeepSeek's first-party app cannot take over the authorize request.
+        val probe = Intent(Intent.ACTION_VIEW, "https://example.com/".toUri()).addCategory(Intent.CATEGORY_BROWSABLE)
+        @Suppress("DEPRECATION")
+        val browser = packageManager.resolveActivity(probe, PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo?.packageName
+        if (browser == null || browser == "android" || browser == packageName) {
+            throw dev.snowseek.core.DeepSeekFailure("Назначьте обычный браузер по умолчанию в настройках Android, затем повторите Google-вход. / Set a default browser in Android settings, then retry Google sign-in.")
+        }
+        startActivity(Intent(Intent.ACTION_VIEW, url.toUri()).addCategory(Intent.CATEGORY_BROWSABLE).setPackage(browser))
+    }
+
+    @Composable private fun Screen() {
+        val phase = model.phase
+        var manualApproval by remember { mutableStateOf(false) }
+        fun close() { model.cancel(); finish() }
+        BackHandler { close() }
+        LaunchedEffect(phase, returnApproved) {
+            if (phase == GoogleSignInPhase.SETUP && model.hasStartUrl && returnApproved == true) model.openBrowser(::openBrowser)
+            if (phase == GoogleSignInPhase.DONE) {
+                startActivity(Intent(this@GoogleSignInActivity, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+                finish()
+            }
+        }
+        Surface(Modifier.fillMaxSize()) {
+            Column(Modifier.fillMaxSize().systemBarsPadding().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text("Google · DeepSeek", style = MaterialTheme.typography.headlineSmall)
+                when (phase) {
+                    GoogleSignInPhase.SETUP -> {
+                        Text(label("Войдите через Google в браузере, затем подтвердите аккаунт в SnowSeek.",
+                            "Sign in with Google in your browser, then confirm your account in SnowSeek."))
+                        if (returnApproved != true) {
+                            Text(label("Один раз разрешите возврат: в настройках включите «Открывать поддерживаемые ссылки» и выберите chat.deepseek.com.",
+                                "Allow return once: enable Open supported links in settings and select chat.deepseek.com."))
+                            Button(onClick = ::returnSettings, modifier = Modifier.fillMaxWidth()) { Text(label("Разрешить возврат в приложение", "Enable return to app")) }
                         }
-                        if (returned) Text(label("Вход в браузере не подключает аккаунт к SnowSeek.",
-                            "Browser sign-in does not connect an account to SnowSeek."), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        if (failed) Text(label("Не удалось открыть браузер. Проверьте, установлен ли браузер, и повторите попытку.",
-                            "Could not open a browser. Check that a browser is installed and try again."), color = MaterialTheme.colorScheme.error)
-                        if (waiting) LinearProgressIndicator(Modifier.fillMaxWidth())
-                        Button(onClick = { currentPlan?.let { openBrowser(it, toolbarColor) } }, enabled = currentPlan != null && !waiting,
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp), shape = RoundedCornerShape(18.dp)) {
-                            Icon(Icons.AutoMirrored.Outlined.OpenInNew, null)
-                            Spacer(Modifier.width(10.dp))
-                            Text(label("Открыть в браузере", "Open in browser"))
+                        if (returnApproved == null) Row {
+                            Checkbox(checked = manualApproval, onCheckedChange = { manualApproval = it })
+                            Text(label("Я разрешил ссылки возврата", "I enabled return links"), Modifier.padding(top = 12.dp))
                         }
-                        OutlinedButton(onClick = {
-                            if (!intent.getBooleanExtra(EXTRA_FROM_SIGN_IN, false)) {
-                                startActivity(Intent(this@GoogleSignInActivity, OfficialWebActivity::class.java)
-                                    .putExtra("language", if (russian) "ru" else "en"))
+                        if (model.hasStartUrl) {
+                            Button(onClick = { model.openBrowser(::openBrowser) }, enabled = returnApproved == true || manualApproval) {
+                                Text(label("Войти через Google", "Sign in with Google"))
                             }
+                        } else Button(onClick = {
+                            startActivity(Intent(this@GoogleSignInActivity, OfficialWebActivity::class.java)
+                                .putExtra("language", if (russian) "ru" else "en").putExtra("google_mode", true))
                             finish()
-                        }, enabled = !waiting, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp), shape = RoundedCornerShape(18.dp)) {
-                            Text(label("Войти в приложении", "Sign in to the app"))
-                        }
+                        }, modifier = Modifier.fillMaxWidth()) { Text(label("Открыть форму DeepSeek", "Open DeepSeek sign-in")) }
+                        TextButton(onClick = { close() }) { Text(label("К форме входа", "Back to sign-in")) }
                     }
+                    GoogleSignInPhase.WAITING -> {
+                        Text(label("Завершите вход в браузере. Для открытия результата выберите SnowSeek.",
+                            "Finish signing in in your browser. Choose SnowSeek to open the result."))
+                        Text(label("Остались на сайте? Проверьте разрешение возврата и начните вход заново.",
+                            "Still on the website? Check return-link permission and start again."))
+                        TextButton(onClick = ::returnSettings) { Text(label("Проверить ссылки возврата", "Check return links")) }
+                        TextButton(onClick = { close() }) { Text(label("Отменить вход", "Cancel sign-in")) }
+                    }
+                    GoogleSignInPhase.CHECKING -> { CircularProgressIndicator(); Text(label("Проверяем сессию DeepSeek…", "Verifying the DeepSeek session…")) }
+                    GoogleSignInPhase.CONFIRM -> {
+                        Text(label("Подключить этот аккаунт? Проверьте, что это выбранный вами аккаунт Google.", "Connect this account? Check that it is the Google account you chose."))
+                        Text(model.accountName, style = MaterialTheme.typography.titleLarge)
+                        Text(model.accountIdentity)
+                        Button(onClick = model::confirm) { Text(label("Подключить аккаунт", "Connect account")) }
+                        TextButton(onClick = { close() }) { Text(label("Это другой аккаунт / отмена", "Wrong account / cancel")) }
+                    }
+                    GoogleSignInPhase.ERROR -> {
+                        Text(model.message, color = MaterialTheme.colorScheme.error)
+                        TextButton(onClick = { close() }) { Text(label("К форме для нового входа", "Back for a new sign-in")) }
+                    }
+                    GoogleSignInPhase.DONE -> Text(label("Аккаунт подключён", "Account connected"))
                 }
             }
         }
     }
 
-    private fun openBrowser(target: BrowserPlan, toolbarColor: Int) {
-        try {
-            // Start at the official form: its Google button supplies all required verification.
-            // No invented force-login parameters, redirect URIs or authentication result handling.
-            val tab = CustomTabsIntent.Builder()
-                .setEphemeralBrowsingEnabled(target.isolated)
-                .setColorScheme(CustomTabsIntent.COLOR_SCHEME_DARK)
-                .setDefaultColorSchemeParams(CustomTabColorSchemeParams.Builder().setToolbarColor(toolbarColor).build())
-                .setShowTitle(true).build()
-            tab.intent.setPackage(target.provider)
-            tab.intent.data = OfficialWebActivity.SIGN_IN_URL.toUri()
-            failed = false
-            waiting = true
-            browser.launch(tab.intent)
-        } catch (_: ActivityNotFoundException) { waiting = false; failed = true }
-        catch (_: SecurityException) { waiting = false; failed = true }
-    }
-
-    override fun onSaveInstanceState(outState: Bundle) {
-        outState.putBoolean("waiting", waiting)
-        outState.putBoolean("returned", returned)
-        outState.putBoolean("auto_open_handled", autoOpenHandled)
-        super.onSaveInstanceState(outState)
-    }
-
-    companion object {
-        const val EXTRA_FROM_SIGN_IN = "from_embedded_sign_in"
-    }
+    companion object { const val EXTRA_START_URL = "google_authorize_url" }
 }

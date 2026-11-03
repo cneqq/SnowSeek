@@ -44,7 +44,6 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.snowseek.app.BuildConfig
 import dev.snowseek.app.auth.OfficialWebActivity
-import dev.snowseek.app.auth.GoogleSignInActivity
 import dev.snowseek.app.settings.AppSettings
 import dev.snowseek.app.settings.ThemeMode
 import dev.snowseek.app.ui.components.MessageCard
@@ -66,7 +65,7 @@ fun SnowSeekApp(model: SnowSeekViewModel) {
         context.startActivity(Intent(context, OfficialWebActivity::class.java).putExtra("language", settings.language))
     }
     val openGoogle = {
-        context.startActivity(Intent(context, GoogleSignInActivity::class.java).putExtra("language", settings.language))
+        context.startActivity(Intent(context, OfficialWebActivity::class.java).putExtra("language", settings.language).putExtra("google_mode", true))
     }
     SnowSeekTheme(if (!settings.welcomeComplete && ui.isDemo) settings.copy(theme = ThemeMode.DARK) else settings) {
         CompositionLocalProvider(LocalWords provides words, LocalDemoMode provides ui.isDemo) {
@@ -156,8 +155,8 @@ private fun WelcomeScreen(onContinue: () -> Unit, onWeb: () -> Unit, onGoogle: (
             Icon(Icons.AutoMirrored.Outlined.OpenInNew, null, Modifier.size(20.dp)); Spacer(Modifier.width(10.dp))
             Text(w.text("Войти через Google в браузере", "Sign in with Google in browser"))
         }
-        Text(w.text("Чаты откроются на сайте. Для входа в приложение используйте DeepSeek.",
-            "Chats will open on the website. Use DeepSeek to sign in to the app."),
+        Text(w.text("Подтвердите аккаунт в SnowSeek после входа в браузере.",
+            "Confirm your account in SnowSeek after signing in with your browser."),
             modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         TextButton(onClick = onContinue, modifier = Modifier.padding(top = 8.dp)) { Text(w.text("Попробовать демочат", "Try the demo")) }
@@ -435,7 +434,7 @@ private fun SettingsScreen(settings: AppSettings, model: SnowSeekViewModel, onBa
                 }
                 OutlinedButton(onClick = onWeb, modifier = Modifier.fillMaxWidth()) { Text(w.text("Войти через DeepSeek", "Sign in with DeepSeek")) }
                 OutlinedButton(onClick = onGoogle, modifier = Modifier.fillMaxWidth()) { Text(w.text("Войти через Google в браузере", "Sign in with Google in browser")) }
-                Text(w.text("Google-вход откроет сайт, но не подключит аккаунт к SnowSeek.", "Google sign-in opens the website without connecting your account to SnowSeek."),
+                Text(w.text("После Google-входа вернитесь в SnowSeek и подтвердите аккаунт.", "Return to SnowSeek after Google sign-in and confirm your account."),
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 TextButton(onClick = { logoutConfirmation = true }, modifier = Modifier.fillMaxWidth()) { Text(w.text("Выйти из веб-аккаунта", "Sign out of website account"), color = MaterialTheme.colorScheme.error) }
             }

@@ -13,14 +13,20 @@ import kotlinx.coroutines.flow.*
 import kotlinx.serialization.json.*
 
 /** No global CookieHandler, redirects, custom trust manager, browser impersonation or request logging. */
-class DeepSeekHttpTransport(context: Context, private val tokenOverride: String? = null) : DeepSeekTransport {
+class DeepSeekHttpTransport(context: Context, private val tokenOverride: String? = null, private val includeWebCookies: Boolean = true) : DeepSeekTransport {
     private val credentials = DeepSeekCredentials.get(context)
     private val pow = OfficialPowEngine(context.applicationContext)
     @Volatile private var streaming: HttpURLConnection? = null
     override suspend fun request(path: String, body: JsonObject?): JsonElement = requestJson(path, body)
 
-    private suspend fun requestJson(path: String, body: JsonObject?): JsonElement = withContext(Dispatchers.IO) {
-        val connection = open(path, body)
+    /** One-time first-party Google result; never send a previous account's credentials. */
+    suspend fun exchangeGoogleNonce(nonce: String): JsonElement {
+        require(nonce.matches(Regex("[A-Za-z0-9_-]{64}")))
+        return requestJson("/api/v0/users/oauth/get_token", buildJsonObject { put("nonce", nonce); put("provider", "GOOGLE") }, anonymous = true)
+    }
+
+    private suspend fun requestJson(path: String, body: JsonObject?, anonymous: Boolean = false): JsonElement = withContext(Dispatchers.IO) {
+        val connection = open(path, body, anonymous = anonymous)
         try {
             val code = connection.responseCode
             if (code != 200) throw httpFailure(code)
@@ -97,16 +103,17 @@ class DeepSeekHttpTransport(context: Context, private val tokenOverride: String?
         } finally { if (streaming === connection) streaming = null; connection.disconnect() }
     }.flowOn(Dispatchers.IO)
     override fun cancelCompletion() { streaming?.disconnect(); pow.cancel() }
-    private fun open(path: String, body: JsonObject?, proof: String? = null): HttpURLConnection {
+    private fun open(path: String, body: JsonObject?, proof: String? = null, anonymous: Boolean = false): HttpURLConnection {
         require(path.startsWith("/api/v0/") && !path.contains('#') && URI(path).host == null)
-        val token = tokenOverride ?: credentials.token() ?: throw DeepSeekFailure("Войдите в DeepSeek в SnowSeek / Sign in to DeepSeek in SnowSeek")
+        require(!anonymous || (path == "/api/v0/users/oauth/get_token" && proof == null))
+        val token = if (anonymous) null else tokenOverride ?: credentials.token() ?: throw DeepSeekFailure("Войдите в DeepSeek в SnowSeek / Sign in to DeepSeek in SnowSeek")
         val connection = URL("https://chat.deepseek.com$path").openConnection() as HttpURLConnection
         if (proof != null) streaming = connection
         connection.instanceFollowRedirects = false
         connection.connectTimeout = 20_000
         connection.readTimeout = if (proof == null) 30_000 else 90_000
         connection.useCaches = false
-        connection.setRequestProperty("Authorization", "Bearer $token")
+        token?.let { connection.setRequestProperty("Authorization", "Bearer $it") }
         connection.setRequestProperty("Accept", if (proof == null) "application/json" else "text/event-stream")
         connection.setRequestProperty("User-Agent", "SnowSeek/0.2 (Android)")
         connection.setRequestProperty("Origin", "https://chat.deepseek.com")
@@ -115,8 +122,10 @@ class DeepSeekHttpTransport(context: Context, private val tokenOverride: String?
         connection.setRequestProperty("x-client-version", "2.2.0")
         connection.setRequestProperty("x-client-locale", "ru_RU")
         connection.setRequestProperty("x-client-bundle-id", "com.deepseek.chat")
-        CookieManager.getInstance().getCookie("https://chat.deepseek.com/")?.takeIf { it.isNotEmpty() }?.let {
-            connection.setRequestProperty("Cookie", it)
+        if (!anonymous && includeWebCookies && (tokenOverride != null || credentials.mayAttachWebCookies(requireNotNull(token)))) {
+            CookieManager.getInstance().getCookie("https://chat.deepseek.com/")?.takeIf { it.isNotEmpty() }?.let {
+                connection.setRequestProperty("Cookie", it)
+            }
         }
         proof?.let { connection.setRequestProperty("x-ds-pow-response", it) }
         if (body != null) {

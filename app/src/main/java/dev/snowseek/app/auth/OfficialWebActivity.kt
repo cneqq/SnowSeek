@@ -88,6 +88,7 @@ class OfficialWebActivity : ComponentActivity() {
     private var error by mutableStateOf<String?>(null)
     private var confirmLogout by mutableStateOf(false)
     private var showGoogleChoice by mutableStateOf(false)
+    private var googleHandoff = false
     private var clearing by mutableStateOf(false)
     private var connecting by mutableStateOf(false)
     private var sessionCleared by mutableStateOf(false)
@@ -166,6 +167,10 @@ class OfficialWebActivity : ComponentActivity() {
         CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
         webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                if (GoogleWebSignIn.shouldHandoff(request.url.toString(), view.url, request.isForMainFrame) && !clearing && !sessionCleared) {
+                    openGoogleSignIn(request.url.toString())
+                    return true
+                }
                 if (GoogleWebSignIn.isEmbeddedOAuthBlocked(request.url.toString())) {
                     if (request.isForMainFrame) showGoogleRestriction()
                     return true
@@ -416,13 +421,23 @@ class OfficialWebActivity : ComponentActivity() {
         showGoogleChoice = true
     }
 
+    private fun openGoogleSignIn(authorizeUrl: String) {
+        if (googleHandoff) return
+        googleHandoff = true
+        loading = false
+        blankCheck?.cancel()
+        startActivity(Intent(this, GoogleSignInActivity::class.java)
+            .putExtra(GoogleSignInActivity.EXTRA_START_URL, authorizeUrl)
+            .putExtra("language", if (russian) "ru" else "en"))
+    }
+
     private fun applySignInTheme(view: WebView) {
         if (view.url?.toUri()?.let { it.scheme == "https" && it.host == GoogleWebSignIn.HOST } != true) return
         view.evaluateJavascript("$signInTheme\nwindow.__snowseekSignInTheme && window.__snowseekSignInTheme($styledSignIn);", null)
     }
 
     private suspend fun connectAccount() {
-        if (connecting || clearing || confirmLogout || showGoogleChoice || sessionCleared) return
+        if (connecting || clearing || confirmLogout || showGoogleChoice || googleHandoff || sessionCleared) return
         val view = webView ?: return
         val page = view.url
         fun official() = view.url == page && page?.let {
@@ -445,7 +460,7 @@ class OfficialWebActivity : ComponentActivity() {
             val token = (Json.parseToJsonElement(result) as? JsonPrimitive)?.contentOrNull
                 ?.takeIf { it.isNotBlank() && it != "null" && it.length < 16_384 }
             val connected = sessionConnection.connect(token,
-                current = { !sessionCleared && !clearing && !confirmLogout && !showGoogleChoice && webView === view && official() &&
+                current = { !sessionCleared && !clearing && !confirmLogout && !showGoogleChoice && !googleHandoff && webView === view && official() &&
                     lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) },
                 verify = { received ->
                     connecting = true
@@ -509,6 +524,8 @@ class OfficialWebActivity : ComponentActivity() {
         }) { padding ->
             Column(Modifier.fillMaxSize().padding(padding).onSizeChanged { heightController.composeRoot(it.width, it.height) }) {
                 settingsError?.let { Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error) }
+                if (intent.getBooleanExtra("google_mode", false)) Text(text("Нажмите Google в форме ниже.", "Choose Google in the form below."),
+                    Modifier.padding(horizontal = 16.dp, vertical = 8.dp), style = MaterialTheme.typography.bodySmall)
                 if (connecting) Text(text("Подключаем аккаунт…", "Connecting your account…"), Modifier.padding(12.dp),
                     style = MaterialTheme.typography.bodySmall)
                 if (clearing || connecting) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
@@ -533,14 +550,13 @@ class OfficialWebActivity : ComponentActivity() {
             }
             AlertDialog(onDismissRequest = { stayHere() },
                 title = { Text(text("Открыть Google в браузере?", "Open Google in your browser?")) },
-                text = { Text(text("Этот вход откроет сайт, но не подключит SnowSeek. В браузере может открыться ваш текущий аккаунт DeepSeek.",
-                    "This opens the website without connecting SnowSeek. Your browser may use your current DeepSeek account.")) },
+                text = { Text(text("Для подключения аккаунта начните вход кнопкой Google на форме DeepSeek. Пароль Google вводится только в браузере.",
+                    "To connect your account, start with the Google button on the DeepSeek form. Enter your Google password only in the browser.")) },
                 confirmButton = { TextButton(onClick = {
                     stayHere()
                     startActivity(Intent(this, GoogleSignInActivity::class.java)
-                        .putExtra("language", if (russian) "ru" else "en")
-                        .putExtra(GoogleSignInActivity.EXTRA_FROM_SIGN_IN, true))
-                }) { Text(text("Открыть в браузере", "Open in browser")) } },
+                        .putExtra("language", if (russian) "ru" else "en"))
+                }) { Text(text("Продолжить", "Continue")) } },
                 dismissButton = { TextButton(onClick = { stayHere() }) { Text(text("Остаться здесь", "Stay here")) } })
         }
         error?.takeIf { !showGoogleChoice && !confirmLogout && !clearing }?.let { message ->
@@ -590,6 +606,10 @@ class OfficialWebActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         webView?.onResume()
+        if (googleHandoff) {
+            googleHandoff = false
+            webView?.let { if (!sessionCleared && !clearing) startPage(it) }
+        }
 
     }
 

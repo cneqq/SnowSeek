@@ -19,17 +19,19 @@ class DeepSeekCredentials private constructor(context: Context) {
     val changes = revision.asStateFlow()
     private var cached: String? = load()
     @Synchronized fun token(): String? = cached
-    @Synchronized fun save(token: String) {
+    @Synchronized fun mayAttachWebCookies(token: String): Boolean = cached == token && preferences.getBoolean("web_cookies", true)
+    @Synchronized fun save(token: String, webCookies: Boolean = true) {
         require(token.isNotBlank() && token.length < 16_384)
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, key())
         val value = cipher.iv + cipher.doFinal(token.toByteArray(Charsets.UTF_8))
-        check(preferences.edit().putString("encrypted_token", Base64.encodeToString(value, Base64.NO_WRAP)).commit()) { "Session could not be saved" }
+        check(preferences.edit().putString("encrypted_token", Base64.encodeToString(value, Base64.NO_WRAP))
+            .putBoolean("web_cookies", webCookies).commit()) { "Session could not be saved" }
         cached = token
         revision.value++
     }
     @Synchronized fun clear() {
-        check(preferences.edit().remove("encrypted_token").commit()) { "Session could not be cleared" }
+        check(preferences.edit().remove("encrypted_token").remove("web_cookies").commit()) { "Session could not be cleared" }
         cached = null
         revision.value++
     }
