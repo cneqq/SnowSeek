@@ -26,6 +26,8 @@ class DeepSeekStreamDecoder {
     private var operation = "SET"
     var responseId: String? = null
         private set
+    var requestId: String? = null
+        private set
     var title: String? = null
         private set
     var closed = false
@@ -35,7 +37,10 @@ class DeepSeekStreamDecoder {
             catch (_: Exception) { throw DeepSeekFailure("DeepSeek: invalid SSE JSON") }
             ?: throw DeepSeekFailure("DeepSeek: invalid SSE event")
         when (frame.event) {
-            "ready" -> responseId = obj.text("response_message_id")
+            "ready" -> {
+                responseId = obj.text("response_message_id")
+                requestId = obj.text("request_message_id")
+            }
             "title" -> title = obj.text("content")
             "close" -> closed = true
             "update_session" -> Unit

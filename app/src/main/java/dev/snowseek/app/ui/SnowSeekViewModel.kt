@@ -46,6 +46,7 @@ data class ChatUiState(
     val signingOut: Boolean = false,
     val isDemo: Boolean = true,
     val errorMessage: String? = null,
+    val deliveryUncertain: Boolean = false,
 )
 
 class SnowSeekViewModel(application: Application) : AndroidViewModel(application) {
@@ -53,7 +54,7 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
     private val credentials = DeepSeekCredentials.get(application)
     private val transport = DeepSeekHttpTransport(application)
     private val demo = MockChatProvider(FileChatStore(application))
-    private val web = DeepSeekWebProvider(transport)
+    private val web = DeepSeekWebProvider(transport, preferences)
     private var provider: ChatProvider = if (credentials.token() == null) demo else web
     private val mutableUi = MutableStateFlow(ChatUiState())
     val ui = mutableUi.asStateFlow()
@@ -101,7 +102,8 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
         }
     }
     private fun report(failure: Exception) {
-        mutableUi.update { it.copy(error = true, errorMessage = (failure as? DeepSeekFailure)?.message) }
+        mutableUi.update { it.copy(error = true, errorMessage = (failure as? DeepSeekFailure)?.message,
+            deliveryUncertain = failure is DeepSeekDeliveryUncertain) }
     }
 
     fun initialize() {

@@ -2,6 +2,8 @@ package dev.snowseek.app.settings
 
 import android.content.Context
 import dev.snowseek.core.ChatInstruction
+import dev.snowseek.core.AppliedInstructionStore
+import kotlinx.coroutines.flow.first
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import androidx.datastore.preferences.core.booleanPreferencesKey
@@ -25,7 +27,7 @@ data class AppSettings(
     val customInstructions: List<ChatInstruction> = emptyList(),
 )
 
-class SettingsStore(context: Context) {
+class SettingsStore(context: Context) : AppliedInstructionStore {
     private val store = context.applicationContext.snowSeekSettings
 
     // Read failures are deliberately propagated so the UI can show an actionable error.
@@ -61,6 +63,13 @@ class SettingsStore(context: Context) {
             values[INSTRUCTIONS] = Json.encodeToString(previous.filterNot { it.id == id })
         }
     }
+
+    override suspend fun save(key: String, instruction: ChatInstruction) {
+        store.edit { it[stringPreferencesKey("applied_instruction_" + key)] = Json.encodeToString(instruction) }
+    }
+
+    override suspend fun load(key: String): ChatInstruction? =
+        store.data.first()[stringPreferencesKey("applied_instruction_" + key)]?.let { Json.decodeFromString<ChatInstruction>(it) }
 
     private companion object {
         val INSTRUCTIONS = stringPreferencesKey("custom_instructions_v1")

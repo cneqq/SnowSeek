@@ -9,7 +9,17 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.serialization.json.*
 
 /** Free web account, with no API keys, proxy, automatic resend or protection bypass. */
-class DeepSeekWebProvider(private val transport: DeepSeekTransport? = null) : ChatProvider {
+class DeepSeekWebProvider(
+    private val transport: DeepSeekTransport? = null,
+    private val instructionStore: AppliedInstructionStore? = null,
+) : ChatProvider {
+    private val localInstructions = mutableMapOf<String, ChatInstruction>()
+
+    private suspend fun decodeInstruction(chatId: String, prompt: String): InstructionPrompt.Decoded? {
+        if (!prompt.startsWith("Правила ответа в этом диалоге:\n")) return InstructionPrompt.decode(prompt)
+        val key = InstructionPrompt.key(chatId, prompt)
+        return InstructionPrompt.decode(prompt, localInstructions[key] ?: instructionStore?.load(key))
+    }
     private val state = MutableStateFlow<List<ChatSession>>(emptyList())
     override val chats: StateFlow<List<ChatSession>> = state.asStateFlow()
     override val capabilities = ProviderCapabilities(transport != null, transport != null, transport != null, false)
@@ -68,7 +78,7 @@ class DeepSeekWebProvider(private val transport: DeepSeekTransport? = null) : Ch
             val role = when (item.text("role")?.uppercase()) { "USER" -> MessageRole.USER; "ASSISTANT" -> MessageRole.ASSISTANT; else -> return@mapNotNull null }
             val fragments = item.array("fragments").filterIsInstance<JsonObject>()
             fun contents(type: String) = fragments.filter { it.text("type") == type }.joinToString("") { it.text("content").orEmpty() }
-            val request = if (role == MessageRole.USER) InstructionPrompt.decode(contents("REQUEST")) else null
+            val request = if (role == MessageRole.USER) decodeInstruction(chatId, contents("REQUEST")) else null
             ChatMessage(item.text("message_id") ?: return@mapNotNull null, role,
                 request?.text ?: contents(if (role == MessageRole.USER) "REQUEST" else "RESPONSE"), contents("THINK"),
                 if (item.text("status") in listOf("FINISHED", "COMPLETE")) MessageStatus.COMPLETE else MessageStatus.STOPPED,
@@ -108,10 +118,21 @@ class DeepSeekWebProvider(private val transport: DeepSeekTransport? = null) : Ch
                 put("thinking_enabled", options.deepThink); put("search_enabled", options.search)
                 put("action", JsonNull); put("preempt", false)
             }
+            if (instruction != null) {
+                val key = InstructionPrompt.key(chatId, wirePrompt)
+                instructionStore?.save(key, instruction)
+                localInstructions[key] = instruction
+            }
             submitted = true
             remote.completion(payload, proof).collect { frame ->
                 if (stopRequested) throw CancellationException("Stopped")
                 decoder.accept(frame)
+                decoder.requestId?.takeIf { frame.event == "ready" }?.let { id ->
+                    state.update { chats -> chats.map { chat ->
+                        if (chat.id != chatId) chat else chat.copy(
+                            messages = chat.messages.map { if (it.id == user.id) it.copy(id = id) else it })
+                    } }
+                }
                 latest = decoder.message(draftId)
                 replaceDraft(chatId, draftId, latest, decoder.title)
                 emit(latest)
@@ -128,6 +149,15 @@ class DeepSeekWebProvider(private val transport: DeepSeekTransport? = null) : Ch
                 if (published) replaceDraft(chatId, draftId, latest.copy(status = MessageStatus.STOPPED), decoder.title)
                 throw CancellationException("Stopped")
             }
+            if (submitted) {
+                val recovered = recoverCompletedResponse(chatId, decoder.responseId)
+                if (recovered != null && !stopRequested) {
+                    parents[chatId] = recovered.id
+                    replaceDraft(chatId, draftId, recovered, decoder.title)
+                    emit(recovered)
+                    return@flow
+                }
+            }
             if (published) replaceDraft(chatId, draftId, latest.copy(status = MessageStatus.ERROR), decoder.title)
             if (submitted) throw DeepSeekDeliveryUncertain((failure as? DeepSeekFailure)?.message)
             throw failure
@@ -135,6 +165,29 @@ class DeepSeekWebProvider(private val transport: DeepSeekTransport? = null) : Ch
             remote.cancelCompletion(); active = null; sending.unlock()
         }
     }
+    private suspend fun recoverCompletedResponse(chatId: String, responseId: String?): ChatMessage? {
+        if (responseId == null) return null
+        return kotlinx.coroutines.withTimeoutOrNull(4_000) {
+            try {
+                val url = java.net.URLEncoder.encode(chatId, "UTF-8")
+                val history = api().request("/api/v0/chat/history_messages?chat_session_id=$url").jsonObject
+                val response = history.array("chat_messages").filterIsInstance<JsonObject>().firstOrNull {
+                    it.text("message_id") == responseId && it.text("role")?.equals("ASSISTANT", ignoreCase = true) == true &&
+                        it.text("status") in setOf("FINISHED", "COMPLETE")
+                } ?: return@withTimeoutOrNull null
+                val fragments = response.array("fragments").filterIsInstance<JsonObject>()
+                fun contents(type: String) = fragments.filter { it.text("type") == type }.joinToString("") { it.text("content").orEmpty() }
+                val answer = contents("RESPONSE")
+                if (answer.isBlank()) return@withTimeoutOrNull null
+                ChatMessage(responseId, MessageRole.ASSISTANT, answer, contents("THINK"), createdAt = timestamp(response, "inserted_at"))
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
+
     private fun replaceDraft(chatId: String, draftId: String, message: ChatMessage, title: String?) {
         state.update { list -> list.map { chat -> if (chat.id != chatId) chat else chat.copy(
             messages = chat.messages.map { if (it.id == draftId || it.id == message.id || it.status == MessageStatus.GENERATING && it.role == MessageRole.ASSISTANT) message else it },

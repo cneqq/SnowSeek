@@ -86,14 +86,17 @@ fun SnowSeekApp(model: SnowSeekViewModel) {
                     onDismissRequest = model::dismissError,
                     icon = { Icon(Icons.Outlined.ErrorOutline, null) },
                     title = { Text(words.text("Не удалось выполнить действие", "Something went wrong")) },
-                    text = { Text(ui.errorMessage ?: words.text(
+                    text = { Text(if (ui.deliveryUncertain) words.text(
+                        "Ответ пока не удалось получить. Обновите чат, чтобы проверить историю.",
+                        "The reply is unavailable. Refresh the chat to check its history.",
+                    ) else ui.errorMessage ?: words.text(
                         "Проверьте свободное место и повторите попытку. Если локальная история повреждена, она сохранена без перезаписи. Веб-соединение проверяется отдельно на экране сайта.",
                         "Check available storage and try again. A damaged local history is preserved without overwriting. Website connectivity is handled separately on the website screen.",
                     )) },
                     confirmButton = { TextButton(onClick = {
                         model.dismissError()
                         if (!ui.initialized) model.initialize() else ui.selectedId?.let(model::select)
-                    }) { Text(words.text("Повторить", "Try again")) } },
+                    }) { Text(if (ui.deliveryUncertain) words.text("Обновить чат", "Refresh chat") else words.text("Повторить", "Try again")) } },
                     dismissButton = { TextButton(onClick = model::dismissError) { Text(words.text("Закрыть", "Close")) } },
                 )
             }

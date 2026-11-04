@@ -37,22 +37,20 @@ fun InstructionSelector(ui: ChatUiState, model: SnowSeekViewModel) {
     var editing by remember { mutableStateOf<ChatInstruction?>(null) }
     var creating by rememberSaveable { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<ChatInstruction?>(null) }
-    FilterChip(
-        selected = selected != null,
-        onClick = { keyboard?.hide(); show = true },
-        enabled = !ui.generating && !ui.loading,
-        modifier = Modifier.padding(start = 8.dp).widthIn(max = 280.dp),
-        label = { Text(selected?.title ?: w.text("Инструкции", "Instructions"), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-        trailingIcon = { Icon(Icons.Outlined.ExpandMore, null, Modifier.size(18.dp)) },
-    )
-    if (show && !creating && editing == null && deleting == null) ModalBottomSheet(
-        onDismissRequest = { show = false },
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-    ) {
-        Column(Modifier.fillMaxWidth().heightIn(max = 440.dp).verticalScroll(rememberScrollState())
-            .padding(start = 20.dp, end = 20.dp, bottom = 20.dp)) {
-            Text(w.text("Инструкции", "Instructions"), style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.padding(bottom = 8.dp))
+    Box {
+        FilterChip(
+            selected = selected != null,
+            onClick = { keyboard?.hide(); show = true },
+            enabled = !ui.generating && !ui.loading,
+            modifier = Modifier.padding(start = 8.dp).widthIn(max = 280.dp),
+            label = { Text(selected?.title ?: w.text("Инструкции", "Instructions"), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            trailingIcon = { Icon(Icons.Outlined.ExpandMore, null, Modifier.size(18.dp)) },
+        )
+        DropdownMenu(
+            expanded = show && !creating && editing == null && deleting == null,
+            onDismissRequest = { show = false },
+            modifier = Modifier.widthIn(min = 220.dp, max = 320.dp).heightIn(max = 360.dp),
+        ) {
             InstructionRow(w.text("Без инструкции", "No instruction"), selected == null,
                 onChoose = { model.selectInstruction(null); show = false })
             BuiltInInstructions.all.forEach { instruction ->
@@ -61,7 +59,7 @@ fun InstructionSelector(ui: ChatUiState, model: SnowSeekViewModel) {
             }
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             if (settings.customInstructions.isNotEmpty()) {
-                Text(w.text("Мои инструкции", "My instructions"), style = MaterialTheme.typography.labelLarge,
+                Text(w.text("Мои инструкции", "My instructions"), modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp), style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             settings.customInstructions.forEach { instruction ->
@@ -69,11 +67,9 @@ fun InstructionSelector(ui: ChatUiState, model: SnowSeekViewModel) {
                     onChoose = { model.selectInstruction(instruction); show = false },
                     onEdit = { editing = instruction }, onDelete = { deleting = instruction })
             }
-            TextButton(onClick = { creating = true }, enabled = settings.customInstructions.size < 100) {
-                Icon(Icons.Outlined.Add, null, Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(w.text("Добавить свою", "Add instruction"))
-            }
+            DropdownMenuItem(text = { Text(w.text("Новая инструкция", "New instruction")) },
+                leadingIcon = { Icon(Icons.Outlined.Add, null) },
+                onClick = { creating = true }, enabled = settings.customInstructions.size < 100)
         }
     }
     if (creating || editing != null) InstructionEditor(editing,
@@ -92,13 +88,12 @@ private fun InstructionRow(title: String, selected: Boolean, onChoose: () -> Uni
     onEdit: (() -> Unit)? = null, onDelete: (() -> Unit)? = null) {
     val w = LocalWords.current
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Surface(onClick = onChoose, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.surfaceContainerLow) {
-            Row(Modifier.heightIn(min = 48.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                RadioButton(selected = selected, onClick = null)
-                Spacer(Modifier.width(12.dp))
-                Text(title, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyLarge)
-            }
-        }
+        DropdownMenuItem(
+            text = { Text(title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+            onClick = onChoose,
+            modifier = Modifier.weight(1f),
+            trailingIcon = if (selected) ({ Icon(Icons.Outlined.Check, w.text("Выбрано", "Selected")) }) else null,
+        )
         if (onEdit != null) IconButton(onClick = onEdit) { Icon(Icons.Outlined.Edit, w.text("Изменить инструкцию", "Edit instruction")) }
         if (onDelete != null) IconButton(onClick = onDelete) { Icon(Icons.Outlined.DeleteOutline, w.text("Удалить инструкцию", "Delete instruction")) }
     }
@@ -109,21 +104,22 @@ private fun InstructionEditor(instruction: ChatInstruction?, onDismiss: () -> Un
     val w = LocalWords.current
     var title by rememberSaveable(instruction?.id) { mutableStateOf(instruction?.title.orEmpty()) }
     var text by rememberSaveable(instruction?.id) { mutableStateOf(instruction?.text.orEmpty()) }
-    AlertDialog(onDismissRequest = onDismiss,
-        title = { Text(w.text(if (instruction == null) "Новая инструкция" else "Изменить инструкцию",
-            if (instruction == null) "New instruction" else "Edit instruction")) },
-        text = {
-            Column(Modifier.fillMaxWidth().heightIn(max = 400.dp).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(value = title, onValueChange = { title = it.take(80) }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth(), label = { Text(w.text("Название", "Title")) })
-                OutlinedTextField(value = text, onValueChange = { text = it.take(8_000) }, minLines = 5, maxLines = 10,
-                    modifier = Modifier.fillMaxWidth(), label = { Text(w.text("Текст инструкции", "Instruction text")) },
-                    supportingText = { Text(text.length.toString() + " / 8000") })
+    ModalBottomSheet(onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(start = 20.dp, end = 20.dp, bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(w.text(if (instruction == null) "Новая инструкция" else "Изменить инструкцию",
+                if (instruction == null) "New instruction" else "Edit instruction"), style = MaterialTheme.typography.titleMedium)
+            OutlinedTextField(value = title, onValueChange = { title = it.take(80) }, singleLine = true,
+                modifier = Modifier.fillMaxWidth(), label = { Text(w.text("Название", "Title")) })
+            OutlinedTextField(value = text, onValueChange = { text = it.take(8_000) }, minLines = 3, maxLines = 6,
+                modifier = Modifier.fillMaxWidth(), label = { Text(w.text("Как отвечать", "How to respond")) })
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = onDismiss) { Text(w.text("Отмена", "Cancel")) }
+                Button(onClick = { onSave(title.trim(), text.trim()) }, enabled = title.isNotBlank() && text.isNotBlank()) {
+                    Text(w.text("Сохранить", "Save"))
+                }
             }
-        }, confirmButton = {
-            TextButton(onClick = { onSave(title.trim(), text.trim()) }, enabled = title.isNotBlank() && text.isNotBlank()) {
-                Text(w.text("Сохранить", "Save"))
-            }
-        }, dismissButton = { TextButton(onClick = onDismiss) { Text(w.text("Отмена", "Cancel")) } })
+        }
+    }
 }
