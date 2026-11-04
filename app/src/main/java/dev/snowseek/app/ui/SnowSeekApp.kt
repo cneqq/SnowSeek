@@ -350,6 +350,7 @@ private fun Composer(ui: ChatUiState, model: SnowSeekViewModel) {
         Surface(shape = RoundedCornerShape(26.dp), color = MaterialTheme.colorScheme.surface,
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), shadowElevation = 3.dp) {
             Column(Modifier.padding(8.dp)) {
+                InstructionSelector(ui, model)
                 TextField(value = ui.input, onValueChange = model::input,
                     modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp, max = 180.dp),
                     placeholder = { Text(w.text("Спросите что-нибудь…", "Ask anything…"), style = MaterialTheme.typography.bodyLarge) },

@@ -22,6 +22,7 @@ data class ChatMessage(
     val status: MessageStatus = MessageStatus.COMPLETE,
     @EncodeDefault(EncodeDefault.Mode.ALWAYS)
     val createdAt: Long = System.currentTimeMillis(),
+    val instruction: ChatInstruction? = null,
 )
 
 @Serializable
@@ -38,6 +39,7 @@ data class ChatOptions(
     val deepThink: Boolean = false,
     val search: Boolean = false,
     val language: String = "ru",
+    val instruction: ChatInstruction? = null,
 )
 
 @Serializable

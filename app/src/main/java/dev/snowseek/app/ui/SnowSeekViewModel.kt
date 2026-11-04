@@ -32,6 +32,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 data class ChatUiState(
+    val selectedInstruction: dev.snowseek.core.ChatInstruction? = null,
     val chats: List<ChatSession> = emptyList(),
     val selectedId: String? = null,
     val input: String = "",
@@ -124,9 +125,36 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun selectInstruction(instruction: dev.snowseek.core.ChatInstruction?) {
+        val current = ui.value
+        if (current.loading || current.generating ||
+            current.chats.firstOrNull { it.id == current.selectedId }?.messages?.isNotEmpty() == true) return
+        mutableUi.update { it.copy(selectedInstruction = instruction) }
+    }
+    fun saveInstruction(id: String?, title: String, text: String) {
+        val instruction = dev.snowseek.core.ChatInstruction(id ?: ("custom." + java.util.UUID.randomUUID()), title.trim(), text.trim())
+        if (!instruction.isValid()) return
+        viewModelScope.launch {
+            try {
+                preferences.saveInstruction(instruction)
+                if (ui.value.selectedInstruction?.id == instruction.id) selectInstruction(instruction)
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) { report(failure) }
+        }
+    }
+    fun deleteInstruction(id: String) {
+        viewModelScope.launch {
+            try {
+                preferences.deleteInstruction(id)
+                if (ui.value.selectedInstruction?.id == id) selectInstruction(null)
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) { report(failure) }
+        }
+    }
+
     fun input(value: String) { mutableUi.update { it.copy(input = value.take(32_768)) } }
     fun select(id: String) {
-        mutableUi.update { it.copy(selectedId = id, input = "") }
+        mutableUi.update { it.copy(selectedId = id, input = "", selectedInstruction = null) }
         if (provider !== web) return
         historyLoad?.cancel()
         val ticket = ++historyRevision
@@ -148,7 +176,7 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             try {
                 val chat = provider.createChat()
-                mutableUi.update { it.copy(selectedId = chat.id, input = "") }
+                mutableUi.update { it.copy(selectedId = chat.id, input = "", selectedInstruction = null) }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) { report(failure) }
             finally { mutableUi.update { it.copy(loading = false) } }
@@ -182,7 +210,7 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
                     mutableUi.update { it.copy(selectedId = id) }
                 }
                 activeChatId = chatId
-                provider.sendMessage(chatId, prompt, ChatOptions(current.deepThink, current.search, settings.value.language)).collect { }
+                provider.sendMessage(chatId, prompt, ChatOptions(current.deepThink, current.search, settings.value.language, instruction = current.selectedInstruction)).collect { }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Exception) {

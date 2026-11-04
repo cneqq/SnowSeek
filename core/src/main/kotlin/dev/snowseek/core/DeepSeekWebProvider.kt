@@ -68,10 +68,11 @@ class DeepSeekWebProvider(private val transport: DeepSeekTransport? = null) : Ch
             val role = when (item.text("role")?.uppercase()) { "USER" -> MessageRole.USER; "ASSISTANT" -> MessageRole.ASSISTANT; else -> return@mapNotNull null }
             val fragments = item.array("fragments").filterIsInstance<JsonObject>()
             fun contents(type: String) = fragments.filter { it.text("type") == type }.joinToString("") { it.text("content").orEmpty() }
+            val request = if (role == MessageRole.USER) InstructionPrompt.decode(contents("REQUEST")) else null
             ChatMessage(item.text("message_id") ?: return@mapNotNull null, role,
-                contents(if (role == MessageRole.USER) "REQUEST" else "RESPONSE"), contents("THINK"),
+                request?.text ?: contents(if (role == MessageRole.USER) "REQUEST" else "RESPONSE"), contents("THINK"),
                 if (item.text("status") in listOf("FINISHED", "COMPLETE")) MessageStatus.COMPLETE else MessageStatus.STOPPED,
-                timestamp(item, "inserted_at"))
+                timestamp(item, "inserted_at"), instruction = request?.instruction)
         }
         parents[chatId] = ordered.lastOrNull()?.text("message_id")
         state.update { list -> list.map { if (it.id == chatId) it.copy(messages = messages, title = session?.text("title") ?: it.title) else it } }
@@ -87,9 +88,11 @@ class DeepSeekWebProvider(private val transport: DeepSeekTransport? = null) : Ch
         var published = false
         val decoder = DeepSeekStreamDecoder()
         try {
-            getMessages(chatId)
+            val previousMessages = getMessages(chatId)
             active = chatId; stopRequested = false
-            val user = ChatMessage("pending-user-${UUID.randomUUID()}", MessageRole.USER, prompt)
+            val instruction = instructionForRequest(previousMessages, null, options.instruction)
+            val wirePrompt = instruction?.let { InstructionPrompt.encode(it, prompt) } ?: prompt
+            val user = ChatMessage("pending-user-${UUID.randomUUID()}", MessageRole.USER, prompt, instruction = instruction)
             state.update { list -> list.map { if (it.id == chatId) it.copy(messages = it.messages + user + latest) else it } }
             published = true
             val challenge = remote.request("/api/v0/chat/create_pow_challenge", buildJsonObject { put("target_path", "/api/v0/chat/completion") })
@@ -101,7 +104,7 @@ class DeepSeekWebProvider(private val transport: DeepSeekTransport? = null) : Ch
             val payload = buildJsonObject {
                 put("chat_session_id", chatId)
                 put("parent_message_id", parent?.let { it.toLongOrNull()?.let(::JsonPrimitive) ?: JsonPrimitive(it) } ?: JsonNull)
-                put("model_type", JsonNull); put("prompt", prompt); putJsonArray("ref_file_ids") { }
+                put("model_type", JsonNull); put("prompt", wirePrompt); putJsonArray("ref_file_ids") { }
                 put("thinking_enabled", options.deepThink); put("search_enabled", options.search)
                 put("action", JsonNull); put("preempt", false)
             }

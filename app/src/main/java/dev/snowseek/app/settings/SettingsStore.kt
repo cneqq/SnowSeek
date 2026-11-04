@@ -1,6 +1,9 @@
 package dev.snowseek.app.settings
 
 import android.content.Context
+import dev.snowseek.core.ChatInstruction
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
@@ -19,6 +22,7 @@ data class AppSettings(
     val textScale: Float = 1f,
     val animations: Boolean = true,
     val welcomeComplete: Boolean = false,
+    val customInstructions: List<ChatInstruction> = emptyList(),
 )
 
 class SettingsStore(context: Context) {
@@ -32,6 +36,8 @@ class SettingsStore(context: Context) {
             textScale = validScale(values[TEXT_SCALE] ?: 1f),
             animations = values[ANIMATIONS] ?: true,
             welcomeComplete = values[WELCOME] ?: false,
+            customInstructions = values[INSTRUCTIONS]?.let { Json.decodeFromString<List<ChatInstruction>>(it) }
+                .orEmpty().filter { it.isValid() && it.id.startsWith("custom.") }.distinctBy { it.id },
         )
     }
 
@@ -41,7 +47,23 @@ class SettingsStore(context: Context) {
     suspend fun updateAnimations(value: Boolean) { store.edit { it[ANIMATIONS] = value } }
     suspend fun completeWelcome() { store.edit { it[WELCOME] = true } }
 
+    suspend fun saveInstruction(instruction: ChatInstruction) {
+        require(instruction.isValid() && instruction.id.startsWith("custom."))
+        store.edit { values ->
+            val previous = values[INSTRUCTIONS]?.let { Json.decodeFromString<List<ChatInstruction>>(it) }.orEmpty()
+            require(previous.size < 100 || previous.any { it.id == instruction.id }) { "Instruction limit reached" }
+            values[INSTRUCTIONS] = Json.encodeToString(previous.filterNot { it.id == instruction.id } + instruction)
+        }
+    }
+    suspend fun deleteInstruction(id: String) {
+        store.edit { values ->
+            val previous = values[INSTRUCTIONS]?.let { Json.decodeFromString<List<ChatInstruction>>(it) }.orEmpty()
+            values[INSTRUCTIONS] = Json.encodeToString(previous.filterNot { it.id == id })
+        }
+    }
+
     private companion object {
+        val INSTRUCTIONS = stringPreferencesKey("custom_instructions_v1")
         val THEME = stringPreferencesKey("theme")
         val LANGUAGE = stringPreferencesKey("language")
         val TEXT_SCALE = floatPreferencesKey("text_scale")

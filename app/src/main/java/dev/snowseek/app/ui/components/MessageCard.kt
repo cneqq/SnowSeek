@@ -44,6 +44,7 @@ fun MessageCard(message: ChatMessage) {
     val user = message.role == MessageRole.USER
     Column(Modifier.fillMaxWidth(), horizontalAlignment = if (user) Alignment.End else Alignment.Start) {
         if (user) {
+            message.instruction?.let { dev.snowseek.app.ui.AppliedInstruction(it) }
             Surface(shape = RoundedCornerShape(22.dp, 22.dp, 6.dp, 22.dp),
                 color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.widthIn(max = 560.dp)) {
                 SelectionContainer { Text(message.text, Modifier.padding(horizontal = 18.dp, vertical = 14.dp), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onPrimaryContainer) }
