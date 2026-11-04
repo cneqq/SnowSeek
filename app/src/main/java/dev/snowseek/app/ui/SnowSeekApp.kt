@@ -194,7 +194,7 @@ private fun ChatScreen(ui: ChatUiState, settings: AppSettings, model: SnowSeekVi
     var deleteId by rememberSaveable { mutableStateOf<String?>(null) }
     val current = ui.chats.firstOrNull { it.id == ui.selectedId }
     ModalNavigationDrawer(drawerState = drawer, drawerContent = {
-        ModalDrawerSheet(modifier = Modifier.widthIn(max = 320.dp), drawerContainerColor = MaterialTheme.colorScheme.background) {
+        ModalDrawerSheet(modifier = Modifier.widthIn(max = 320.dp), drawerContainerColor = MaterialTheme.colorScheme.surfaceVariant) {
             Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 BrandMark(); Text("SnowSeek", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             }
@@ -346,7 +346,7 @@ private fun MessageList(chat: ChatSession, animations: Boolean, modifier: Modifi
 private fun Composer(ui: ChatUiState, model: SnowSeekViewModel) {
     val w = LocalWords.current
     val keyboard = LocalSoftwareKeyboardController.current
-    Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp)) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp).padding(bottom = 16.dp)) {
         Surface(shape = RoundedCornerShape(26.dp), color = MaterialTheme.colorScheme.surface,
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), shadowElevation = 3.dp) {
             Column(Modifier.padding(8.dp)) {
@@ -391,7 +391,10 @@ private fun SettingsScreen(settings: AppSettings, model: SnowSeekViewModel, onBa
     var logoutConfirmation by rememberSaveable { mutableStateOf(false) }
     var showLicenses by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
-    Scaffold(containerColor = MaterialTheme.colorScheme.background, topBar = {
+    val snackbarHost = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    Scaffold(containerColor = MaterialTheme.colorScheme.background,
+        snackbarHost = { SnackbarHost(snackbarHost) }, topBar = {
         TopAppBar(title = { Text(w.text("Настройки", "Settings")) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, w.text("Назад", "Back")) } },
             colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background))
     }) { padding ->
@@ -404,7 +407,9 @@ private fun SettingsScreen(settings: AppSettings, model: SnowSeekViewModel, onBa
                         TextButton(onClick = { model.theme(theme) }, modifier = Modifier.weight(1f)) { Text(when(theme) {
                             ThemeMode.SYSTEM -> w.text("Как в системе", "System default")
                             ThemeMode.LIGHT -> w.text("Светлая", "Light")
-                            ThemeMode.DARK -> w.text("Тёмная", "Dark")
+                            ThemeMode.DARK -> w.text("Тёмно-синяя", "Dark blue")
+                            ThemeMode.CHARCOAL -> w.text("Тёмная", "Dark")
+                            ThemeMode.BLACK -> w.text("Чёрная", "Black")
                         }, modifier = Modifier.fillMaxWidth()) }
                     }
                 }
@@ -447,7 +452,7 @@ private fun SettingsScreen(settings: AppSettings, model: SnowSeekViewModel, onBa
                 TextButton(onClick = { showLicenses = true }) { Text(w.text("Лицензии открытого ПО", "Open-source licenses")) }
                 TextButton(onClick = {
                     runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, "https://github.com/cneqq/SnowSeek".toUri())) }
-                        .onFailure { android.widget.Toast.makeText(context, w.text("Не удалось открыть браузер", "Could not open a browser"), android.widget.Toast.LENGTH_SHORT).show() }
+                        .onFailure { scope.launch { snackbarHost.showSnackbar(w.text("Не удалось открыть браузер", "Could not open a browser")) } }
                 }) {
                     Icon(Icons.Outlined.Code, null); Spacer(Modifier.width(8.dp)); Text("GitHub · cneqq/SnowSeek")
                 }

@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.map
 
 private val Context.snowSeekSettings by preferencesDataStore(name = "snowseek_settings")
 
-enum class ThemeMode { SYSTEM, LIGHT, DARK }
+enum class ThemeMode { SYSTEM, LIGHT, DARK, CHARCOAL, BLACK }
 
 data class AppSettings(
     val theme: ThemeMode = ThemeMode.SYSTEM,
@@ -48,6 +48,6 @@ class SettingsStore(context: Context) {
         val ANIMATIONS = booleanPreferencesKey("animations")
         val WELCOME = booleanPreferencesKey("welcome_complete")
         fun validLanguage(value: String) = if (value == "en") "en" else "ru"
-        fun validScale(value: Float) = if (value.isFinite()) value.coerceIn(0.8f, 1.6f) else 1f
+        fun validScale(value: Float) = if (value.isFinite()) value.coerceIn(0.7f, 1.5f) else 1f
     }
 }

@@ -7,7 +7,6 @@ import android.content.pm.verify.domain.DomainVerificationUserState
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -20,11 +19,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import dev.snowseek.app.MainActivity
 import dev.snowseek.app.settings.AppSettings
 import dev.snowseek.app.settings.SettingsStore
-import dev.snowseek.app.settings.ThemeMode
 import dev.snowseek.app.ui.theme.SnowSeekTheme
 
 class GoogleSignInActivity : ComponentActivity() {
@@ -52,7 +53,7 @@ class GoogleSignInActivity : ComponentActivity() {
         intent = Intent(this, GoogleSignInActivity::class.java).putExtra("language", language)
         setContent {
             val settings by remember { SettingsStore(applicationContext).settings }.collectAsState(initial = AppSettings())
-            SnowSeekTheme(settings.copy(theme = ThemeMode.DARK)) { Screen() }
+            SnowSeekTheme(settings) { Screen() }
         }
     }
 
@@ -68,9 +69,24 @@ class GoogleSignInActivity : ComponentActivity() {
     }
 
     private fun forwardOtherProvider(url: String) {
-        try { openBrowser(url) }
-        catch (_: Exception) { Toast.makeText(this, label("Откройте результат входа в обычном браузере.", "Open the sign-in result in your browser."), Toast.LENGTH_LONG).show() }
-        finally { finish() }
+        try {
+            openBrowser(url)
+            finish()
+        } catch (_: Exception) {
+            setContent {
+                val settings by remember { SettingsStore(applicationContext).settings }.collectAsState(initial = AppSettings())
+                SnowSeekTheme(settings) {
+                    Surface(Modifier.fillMaxSize()) {
+                        AlertDialog(
+                            onDismissRequest = { finish() },
+                            title = { Text(label("Не удалось открыть браузер", "Could not open a browser")) },
+                            text = { Text(label("Откройте результат входа в обычном браузере.", "Open the sign-in result in your browser.")) },
+                            confirmButton = { TextButton(onClick = { finish() }) { Text(label("Закрыть", "Close")) } },
+                        )
+                    }
+                }
+            }
+        }
     }
 
     override fun onResume() {
@@ -108,8 +124,15 @@ class GoogleSignInActivity : ComponentActivity() {
 
     @Composable private fun Screen() {
         val phase = model.phase
-        var manualApproval by remember { mutableStateOf(false) }
         fun close() { model.cancel(); finish() }
+        fun continueSignIn() {
+            if (model.hasStartUrl) model.openBrowser(::openBrowser)
+            else {
+                startActivity(Intent(this@GoogleSignInActivity, OfficialWebActivity::class.java)
+                    .putExtra("language", if (russian) "ru" else "en").putExtra("google_mode", true))
+                finish()
+            }
+        }
         BackHandler { close() }
         LaunchedEffect(phase, returnApproved) {
             if (phase == GoogleSignInPhase.SETUP && model.hasStartUrl && returnApproved == true) model.openBrowser(::openBrowser)
@@ -118,54 +141,92 @@ class GoogleSignInActivity : ComponentActivity() {
                 finish()
             }
         }
-        Surface(Modifier.fillMaxSize()) {
-            Column(Modifier.fillMaxSize().systemBarsPadding().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text("Google · DeepSeek", style = MaterialTheme.typography.headlineSmall)
+        val title = when (phase) {
+            GoogleSignInPhase.SETUP -> if (returnApproved == true) label("Вход через Google", "Sign in with Google")
+                else label("Вернитесь в SnowSeek после входа", "Return to SnowSeek after sign-in")
+            GoogleSignInPhase.WAITING -> label("Завершите вход в браузере", "Finish signing in in your browser")
+            GoogleSignInPhase.CHECKING -> label("Подключаем аккаунт", "Connecting your account")
+            GoogleSignInPhase.CONFIRM -> label("Войти в этот аккаунт?", "Sign in with this account?")
+            GoogleSignInPhase.ERROR -> label("Не удалось войти", "Could not sign in")
+            GoogleSignInPhase.DONE -> label("Аккаунт подключён", "Account connected")
+        }
+        val detail = when (phase) {
+            GoogleSignInPhase.SETUP -> if (returnApproved == true)
+                label("Продолжите на официальной форме DeepSeek.", "Continue on the official DeepSeek form.")
+                else label("В настройках Android включите открытие поддерживаемых ссылок для SnowSeek и выберите chat.deepseek.com. Это нужно один раз.",
+                    "In Android settings, allow SnowSeek to open supported links and select chat.deepseek.com. You only need to do this once.")
+            GoogleSignInPhase.WAITING -> label("После входа выберите SnowSeek, чтобы подключить аккаунт DeepSeek.",
+                "After signing in, choose SnowSeek to connect your DeepSeek account.")
+            GoogleSignInPhase.CHECKING -> label("Проверяем сессию DeepSeek…", "Verifying your DeepSeek session…")
+            GoogleSignInPhase.CONFIRM -> label("Проверьте аккаунт перед подключением к SnowSeek.", "Check the account before connecting it to SnowSeek.")
+            GoogleSignInPhase.ERROR -> model.message
+            GoogleSignInPhase.DONE -> ""
+        }
+        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            BoxWithConstraints(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
+                val availableHeight = maxHeight
+                Column(
+                    Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
+                        .heightIn(min = availableHeight).padding(horizontal = 24.dp, vertical = 32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                Column(Modifier.widthIn(max = 400.dp).fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text("SnowSeek", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                Text(title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+                if (detail.isNotEmpty()) Text(detail, style = MaterialTheme.typography.bodyLarge,
+                    color = if (phase == GoogleSignInPhase.ERROR) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center)
+                Spacer(Modifier.height(8.dp))
                 when (phase) {
                     GoogleSignInPhase.SETUP -> {
-                        Text(label("Войдите через Google в браузере, затем подтвердите аккаунт в SnowSeek.",
-                            "Sign in with Google in your browser, then confirm your account in SnowSeek."))
                         if (returnApproved != true) {
-                            Text(label("Один раз разрешите возврат: в настройках включите «Открывать поддерживаемые ссылки» и выберите chat.deepseek.com.",
-                                "Allow return once: enable Open supported links in settings and select chat.deepseek.com."))
-                            Button(onClick = ::returnSettings, modifier = Modifier.fillMaxWidth()) { Text(label("Разрешить возврат в приложение", "Enable return to app")) }
-                        }
-                        if (returnApproved == null) Row {
-                            Checkbox(checked = manualApproval, onCheckedChange = { manualApproval = it })
-                            Text(label("Я разрешил ссылки возврата", "I enabled return links"), Modifier.padding(top = 12.dp))
-                        }
-                        if (model.hasStartUrl) {
-                            Button(onClick = { model.openBrowser(::openBrowser) }, enabled = returnApproved == true || manualApproval) {
-                                Text(label("Войти через Google", "Sign in with Google"))
+                            Button(onClick = ::returnSettings, modifier = Modifier.fillMaxWidth()) {
+                                Text(label("Открыть настройки", "Open settings"))
                             }
-                        } else Button(onClick = {
-                            startActivity(Intent(this@GoogleSignInActivity, OfficialWebActivity::class.java)
-                                .putExtra("language", if (russian) "ru" else "en").putExtra("google_mode", true))
-                            finish()
-                        }, modifier = Modifier.fillMaxWidth()) { Text(label("Открыть форму DeepSeek", "Open DeepSeek sign-in")) }
+                            if (returnApproved == null) {
+                                Text(label("Не удалось проверить настройку автоматически. При возврате из браузера выберите SnowSeek.",
+                                    "The setting could not be checked automatically. Choose SnowSeek when returning from the browser."),
+                                    style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                OutlinedButton(onClick = { continueSignIn() }, modifier = Modifier.fillMaxWidth()) {
+                                    Text(label("Продолжить вход", "Continue sign-in"))
+                                }
+                            }
+                        } else Button(onClick = { continueSignIn() }, modifier = Modifier.fillMaxWidth()) {
+                            Text(label("Войти через Google", "Sign in with Google"))
+                        }
                         TextButton(onClick = { close() }) { Text(label("К форме входа", "Back to sign-in")) }
                     }
                     GoogleSignInPhase.WAITING -> {
-                        Text(label("Завершите вход в браузере. Для открытия результата выберите SnowSeek.",
-                            "Finish signing in in your browser. Choose SnowSeek to open the result."))
-                        Text(label("Остались на сайте? Проверьте разрешение возврата и начните вход заново.",
-                            "Still on the website? Check return-link permission and start again."))
-                        TextButton(onClick = ::returnSettings) { Text(label("Проверить ссылки возврата", "Check return links")) }
+                        OutlinedButton(onClick = ::returnSettings, modifier = Modifier.fillMaxWidth()) {
+                            Text(label("Проверить возврат в приложение", "Check return to app"))
+                        }
                         TextButton(onClick = { close() }) { Text(label("Отменить вход", "Cancel sign-in")) }
                     }
-                    GoogleSignInPhase.CHECKING -> { CircularProgressIndicator(); Text(label("Проверяем сессию DeepSeek…", "Verifying the DeepSeek session…")) }
+                    GoogleSignInPhase.CHECKING -> CircularProgressIndicator(Modifier.size(32.dp))
                     GoogleSignInPhase.CONFIRM -> {
-                        Text(label("Подключить этот аккаунт? Проверьте, что это выбранный вами аккаунт Google.", "Connect this account? Check that it is the Google account you chose."))
-                        Text(model.accountName, style = MaterialTheme.typography.titleLarge)
-                        Text(model.accountIdentity)
-                        Button(onClick = model::confirm) { Text(label("Подключить аккаунт", "Connect account")) }
-                        TextButton(onClick = { close() }) { Text(label("Это другой аккаунт / отмена", "Wrong account / cancel")) }
+                        Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium,
+                            color = MaterialTheme.colorScheme.surfaceVariant) {
+                            Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(model.accountName, style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+                                Text(model.accountIdentity, style = MaterialTheme.typography.bodyLarge,
+                                    textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                            }
+                        }
+                        Button(onClick = model::confirm, modifier = Modifier.fillMaxWidth()) { Text(label("Войти в DeepSeek", "Sign in to DeepSeek")) }
+                        TextButton(onClick = { close() }) { Text(label("Отмена", "Cancel")) }
                     }
                     GoogleSignInPhase.ERROR -> {
-                        Text(model.message, color = MaterialTheme.colorScheme.error)
-                        TextButton(onClick = { close() }) { Text(label("К форме для нового входа", "Back for a new sign-in")) }
+                        Button(onClick = { close() }, modifier = Modifier.fillMaxWidth()) { Text(label("Вернуться к форме входа", "Back to sign-in")) }
                     }
-                    GoogleSignInPhase.DONE -> Text(label("Аккаунт подключён", "Account connected"))
+                    GoogleSignInPhase.DONE -> Unit
+                }
+                }
                 }
             }
         }

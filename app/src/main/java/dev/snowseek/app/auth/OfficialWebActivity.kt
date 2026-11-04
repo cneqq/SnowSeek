@@ -28,21 +28,17 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.material3.Surface
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.Composable
@@ -59,7 +55,6 @@ import java.io.ByteArrayInputStream
 import java.io.IOException
 import dev.snowseek.app.settings.AppSettings
 import dev.snowseek.app.settings.SettingsStore
-import dev.snowseek.app.settings.ThemeMode
 import dev.snowseek.app.ui.theme.SnowSeekTheme
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
@@ -101,7 +96,7 @@ class OfficialWebActivity : ComponentActivity() {
         domDiagnostics.capture("height-correction-result")
     }
     private var showDiagnostics by mutableStateOf(false)
-    private var styledSignIn by mutableStateOf(true)
+    private var signInPalette: JsonObject = buildJsonObject {}
     private val signInTheme by lazy { assets.open("sign-in-theme.js").bufferedReader().use { it.readText() } }
     private val sessionConnection = VerifiedSessionConnection()
     private val russian get() = intent.getStringExtra("language") != "en"
@@ -116,7 +111,6 @@ class OfficialWebActivity : ComponentActivity() {
             "WebView ${engine?.packageName ?: "unknown"} ${engine?.versionName ?: "unknown"}")
         diagnostics.add(WebDebugTab.WebView, "ACTIVITY_CREATED · remote debugging disabled · no JavaScript bridge")
         savedWebState = savedInstanceState?.getBundle(STATE_WEB)
-        styledSignIn = savedInstanceState?.getBoolean("styled_sign_in", true) ?: true
         showGoogleChoice = savedInstanceState?.getBoolean("google_choice") == true
         savedWebRevision = savedInstanceState?.getLong(STATE_REVISION, -1L) ?: -1L
         setContent {
@@ -131,8 +125,8 @@ class OfficialWebActivity : ComponentActivity() {
                         } else false
                     }
             }.collectAsState(initial = AppSettings())
-            SnowSeekTheme(settings.copy(theme = ThemeMode.DARK)) {
-                OfficialScreen()
+            SnowSeekTheme(settings) {
+                OfficialScreen(settings.textScale)
             }
         }
         lifecycleScope.launch {
@@ -320,7 +314,6 @@ class OfficialWebActivity : ComponentActivity() {
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
-        outState.putBoolean("styled_sign_in", styledSignIn)
         outState.putBoolean("google_choice", showGoogleChoice)
         if (!sessionCleared && loadedRevision >= 0L) {
             webView?.let { view ->
@@ -433,7 +426,7 @@ class OfficialWebActivity : ComponentActivity() {
 
     private fun applySignInTheme(view: WebView) {
         if (view.url?.toUri()?.let { it.scheme == "https" && it.host == GoogleWebSignIn.HOST } != true) return
-        view.evaluateJavascript("$signInTheme\nwindow.__snowseekSignInTheme && window.__snowseekSignInTheme($styledSignIn);", null)
+        view.evaluateJavascript("$signInTheme\nwindow.__snowseekSignInTheme && window.__snowseekSignInTheme($signInPalette);", null)
     }
 
     private suspend fun connectAccount() {
@@ -484,56 +477,37 @@ class OfficialWebActivity : ComponentActivity() {
 
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
-    private fun OfficialScreen() {
+    private fun OfficialScreen(textScale: Float) {
         val scope = rememberCoroutineScope()
-        var showMenu by remember { mutableStateOf(false) }
+        val colors = MaterialTheme.colorScheme
+        val palette = remember(colors, textScale) {
+            fun hex(color: androidx.compose.ui.graphics.Color) = "#%06x".format(color.toArgb() and 0xffffff)
+            buildJsonObject {
+                put("enabled", true)
+                put("language", if (russian) "ru" else "en")
+                put("scale", textScale.takeIf { it.isFinite() }?.coerceIn(0.7f, 1.5f) ?: 1f)
+                put("scheme", if (colors.background.luminance() < 0.5f) "dark" else "light")
+                put("background", hex(colors.background)); put("foreground", hex(colors.onBackground))
+                put("surface", hex(colors.surfaceVariant)); put("secondary", hex(colors.onSurfaceVariant))
+                put("primary", hex(colors.primary)); put("onPrimary", hex(colors.onPrimary))
+                put("outline", hex(colors.outline))
+            }
+        }
+        LaunchedEffect(palette) {
+            signInPalette = palette
+            webView?.let { view -> view.setBackgroundColor(colors.background.toArgb()); applySignInTheme(view) }
+        }
         BackHandler(enabled = !clearing) { navigateBack() }
         BackHandler(enabled = clearing) { /* Wait for session cleanup before leaving. */ }
-        Scaffold(topBar = {
-            TopAppBar(
-                title = { Text(text("Вход в DeepSeek", "DeepSeek sign-in"), style = MaterialTheme.typography.titleMedium) },
-                navigationIcon = {
-                    IconButton(onClick = { navigateBack() }, enabled = !clearing) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, text("Назад", "Back"))
-                    }
-                },
-                actions = {
-                    Box {
-                        IconButton(onClick = { showMenu = true }, enabled = !clearing && !connecting) {
-                            Icon(Icons.Default.MoreVert, text("Ещё", "More"))
-                        }
-                        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                            DropdownMenuItem(text = { Text(text("Обновить страницу", "Reload page")) },
-                                enabled = !sessionCleared, onClick = { showMenu = false; reloadPage() })
-                            DropdownMenuItem(text = { Text(if (styledSignIn) text("Исходный вид сайта", "Original website appearance")
-                                else text("Стиль SnowSeek", "SnowSeek appearance")) }, onClick = {
-                                showMenu = false
-                                styledSignIn = !styledSignIn
-                                webView?.let(::applySignInTheme)
-                            })
-                            DropdownMenuItem(text = { Text(text("Выйти из аккаунта", "Sign out")) },
-                                enabled = !sessionCleared, onClick = { showMenu = false; confirmLogout = true })
-                            if (BuildConfig.DEBUG) {
-                                DropdownMenuItem(text = { Text(text("Диагностика", "Diagnostics")) },
-                                    onClick = { showMenu = false; showDiagnostics = true })
-                            }
-                        }
-                    }
-                },
-            )
-        }) { padding ->
-            Column(Modifier.fillMaxSize().padding(padding).onSizeChanged { heightController.composeRoot(it.width, it.height) }) {
+        Surface(Modifier.fillMaxSize()) {
+            Column(Modifier.fillMaxSize().safeDrawingPadding().onSizeChanged { heightController.composeRoot(it.width, it.height) }) {
                 settingsError?.let { Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error) }
-                if (intent.getBooleanExtra("google_mode", false)) Text(text("Нажмите Google в форме ниже.", "Choose Google in the form below."),
-                    Modifier.padding(horizontal = 16.dp, vertical = 8.dp), style = MaterialTheme.typography.bodySmall)
-                if (connecting) Text(text("Подключаем аккаунт…", "Connecting your account…"), Modifier.padding(12.dp),
-                    style = MaterialTheme.typography.bodySmall)
                 if (clearing || connecting) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 else if (loading) LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
                 if (!sessionCleared) {
                     Box(Modifier.fillMaxWidth().weight(1f).onSizeChanged { heightController.composeHost(it.width, it.height) }) {
                         AndroidView(
-                            factory = { createWebView() },
+                            factory = { createWebView().apply { setBackgroundColor(colors.background.toArgb()) } },
                             modifier = Modifier.fillMaxSize(),
                             onRelease = { releaseWebView(it) },
                         )
