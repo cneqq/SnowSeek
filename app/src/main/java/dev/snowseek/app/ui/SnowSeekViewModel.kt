@@ -110,10 +110,8 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
         initialization = viewModelScope.launch {
             try {
                 provider.initialize()
-                val firstId = provider.chats.value.firstOrNull()?.id
-                if (firstId != null && provider === web) provider.getMessages(firstId)
                 mutableUi.update {
-                    it.copy(selectedId = firstId, initialized = true)
+                    it.copy(initialized = true)
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -128,7 +126,7 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
     fun selectInstruction(instruction: dev.snowseek.core.ChatInstruction?) {
         val current = ui.value
         if (current.loading || current.generating ||
-            current.chats.firstOrNull { it.id == current.selectedId }?.messages?.isNotEmpty() == true) return
+            current.selectedId != null) return
         mutableUi.update { it.copy(selectedInstruction = instruction) }
     }
     fun saveInstruction(id: String?, title: String, text: String) {
@@ -172,15 +170,7 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
 
     fun newChat() {
         if (ui.value.generating || ui.value.loading || !ui.value.initialized) return
-        mutableUi.update { it.copy(loading = true) }
-        viewModelScope.launch {
-            try {
-                val chat = provider.createChat()
-                mutableUi.update { it.copy(selectedId = chat.id, input = "", selectedInstruction = null) }
-            } catch (cancelled: CancellationException) { throw cancelled }
-            catch (failure: Exception) { report(failure) }
-            finally { mutableUi.update { it.copy(loading = false) } }
-        }
+        mutableUi.update { it.copy(selectedId = null, input = "", selectedInstruction = null) }
     }
 
     fun deleteChat(id: String) {
