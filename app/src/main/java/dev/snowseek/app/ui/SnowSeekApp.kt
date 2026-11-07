@@ -56,17 +56,25 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.snowseek.app.BuildConfig
 import dev.snowseek.app.auth.OfficialWebActivity
 import dev.snowseek.app.settings.AppSettings
 import dev.snowseek.app.settings.FontMode
+import dev.snowseek.app.settings.GlassSettings
 import dev.snowseek.app.settings.ThemeMode
 import dev.snowseek.app.ui.components.MessageCard
+import dev.snowseek.app.ui.components.ChatComposerLayout
+import dev.snowseek.app.ui.components.ComposerSurface
+import dev.snowseek.app.ui.components.GlassSetting
 import dev.snowseek.app.ui.theme.SnowSeekTheme
 import dev.snowseek.app.ui.theme.fontFamily
 import dev.snowseek.core.ChatSession
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.hazeSource
+import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -171,6 +179,8 @@ private fun ChatScreen(ui: ChatUiState, settings: AppSettings, model: SnowSeekVi
     }
     var deleteId by rememberSaveable { mutableStateOf<String?>(null) }
     val current = ui.chats.firstOrNull { it.id == ui.selectedId }
+    val haze = rememberHazeState()
+    val backdrop = haze.takeIf { settings.glass.enabled && !current?.messages.isNullOrEmpty() }
     val requests = remember(current?.messages) { current?.messages.orEmpty().filter { it.role == dev.snowseek.core.MessageRole.USER } }
     var showRequests by rememberSaveable(current?.id) { mutableStateOf(false) }
     var jumpToRequest by remember(current?.id) { mutableStateOf<String?>(null) }
@@ -261,23 +271,29 @@ private fun ChatScreen(ui: ChatUiState, settings: AppSettings, model: SnowSeekVi
         ) { padding ->
             Column(Modifier.fillMaxSize().padding(padding).imePadding()) {
                 if (ui.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-                if (!ui.initialized && !ui.loading) {
-                    Column(Modifier.weight(1f).fillMaxWidth().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                        Icon(Icons.Outlined.ErrorOutline, null, tint = MaterialTheme.colorScheme.error)
-                        Text(w.text("Не удалось подключиться. Проверьте соединение и повторите попытку.", "Could not connect. Check your connection and try again."), Modifier.padding(vertical = 16.dp))
-                        Button(onClick = model::initialize) { Text(w.text("Повторить", "Try again")) }
+                ChatComposerLayout(
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    overlay = backdrop != null,
+                    composer = { Composer(ui, model, settings.glass, backdrop) },
+                ) { composerInset ->
+                    if (!ui.initialized && !ui.loading) {
+                        Column(Modifier.fillMaxSize().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                            Icon(Icons.Outlined.ErrorOutline, null, tint = MaterialTheme.colorScheme.error)
+                            Text(w.text("Не удалось подключиться. Проверьте соединение и повторите попытку.", "Could not connect. Check your connection and try again."), Modifier.padding(vertical = 16.dp))
+                            Button(onClick = model::initialize) { Text(w.text("Повторить", "Try again")) }
+                        }
+                    } else if (current?.messages.isNullOrEmpty()) {
+                        EmptyChat(current?.id ?: "empty-start", Modifier.fillMaxSize())
+                    } else {
+                        key(current.id) { MessageList(current, settings.animations, Modifier.fillMaxSize(),
+                            composerInset = composerInset, backdrop = backdrop,
+                            canAct = ui.authenticated && !ui.generating && !ui.loading && !ui.uploading,
+                            onEdit = model::editMessage, onContinue = model::continueMessage,
+                            onRegenerate = model::regenerateMessage, onVersion = model::switchVersion,
+                            canSwitchVersion = ui.editingMessageId == null,
+                            jumpToRequest = jumpToRequest, onJumpHandled = { jumpToRequest = null }) }
                     }
-                } else if (current?.messages.isNullOrEmpty()) {
-                    EmptyChat(current?.id ?: "empty-start", Modifier.weight(1f))
-                } else {
-                    key(current.id) { MessageList(current, settings.animations, Modifier.weight(1f),
-                        canAct = ui.authenticated && !ui.generating && !ui.loading && !ui.uploading,
-                        onEdit = model::editMessage, onContinue = model::continueMessage,
-                        onRegenerate = model::regenerateMessage, onVersion = model::switchVersion,
-                        canSwitchVersion = ui.editingMessageId == null,
-                        jumpToRequest = jumpToRequest, onJumpHandled = { jumpToRequest = null }) }
                 }
-                Composer(ui, model)
             }
         }
     }
@@ -356,6 +372,7 @@ private fun MessageList(
     onEdit: (String) -> Unit, onContinue: (String) -> Unit, onRegenerate: (String) -> Unit,
     onVersion: (String, String) -> Unit, canSwitchVersion: Boolean,
     jumpToRequest: String?, onJumpHandled: () -> Unit,
+    composerInset: Dp, backdrop: HazeState?,
 ) {
     val words = LocalWords.current
     val listState = rememberLazyListState()
@@ -392,7 +409,10 @@ private fun MessageList(
         }
     }
     Box(modifier.fillMaxWidth()) {
-        LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 18.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(22.dp)) {
+        val source = if (backdrop == null) Modifier else Modifier.hazeSource(backdrop)
+        LazyColumn(state = listState, modifier = Modifier.fillMaxSize().then(source),
+            contentPadding = PaddingValues(start = 18.dp, top = 16.dp, end = 18.dp, bottom = 16.dp + composerInset),
+            verticalArrangement = Arrangement.spacedBy(22.dp)) {
             items(chat.messages, key = { it.id }) { message ->
                 var visible by remember(message.id) { mutableStateOf(!animations) }
                 LaunchedEffect(message.id) { visible = true }
@@ -439,7 +459,8 @@ private fun MessageList(
             val scope = rememberCoroutineScope()
             val w = LocalWords.current
             SmallFloatingActionButton(onClick = { followLatest = true; scope.launch { listState.scrollToItem(chat.messages.size) } },
-                modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp), containerColor = MaterialTheme.colorScheme.primaryContainer) {
+                modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = composerInset).padding(12.dp),
+                containerColor = MaterialTheme.colorScheme.primaryContainer) {
                 Icon(Icons.Outlined.ArrowDownward, w.text("К последнему сообщению", "Jump to latest message"))
             }
         }
@@ -447,7 +468,7 @@ private fun MessageList(
 }
 
 @Composable
-private fun Composer(ui: ChatUiState, model: SnowSeekViewModel) {
+private fun Composer(ui: ChatUiState, model: SnowSeekViewModel, glass: GlassSettings, backdrop: HazeState?) {
     val w = LocalWords.current
     val keyboard = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
@@ -462,9 +483,8 @@ private fun Composer(ui: ChatUiState, model: SnowSeekViewModel) {
             keyboard?.show()
         }
     }
-    Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp).padding(bottom = 16.dp)) {
-        Surface(shape = RoundedCornerShape(26.dp), color = MaterialTheme.colorScheme.surface,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), shadowElevation = 3.dp) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp).padding(bottom = 20.dp)) {
+        ComposerSurface(glass, backdrop) {
             Column(Modifier.padding(8.dp)) {
                 InstructionSelector(ui, model)
                 if (ui.editingMessageId != null) {
@@ -487,8 +507,8 @@ private fun Composer(ui: ChatUiState, model: SnowSeekViewModel) {
                     enabled = ui.initialized && !ui.loading && !(ui.generating && ui.editingMessageId != null), maxLines = 6,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
                     keyboardActions = KeyboardActions(onSend = { if (canSend && !ui.generating) { keyboard?.hide(); model.send() } }),
-                    colors = TextFieldDefaults.colors(focusedContainerColor = MaterialTheme.colorScheme.surface,
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surface, disabledContainerColor = MaterialTheme.colorScheme.surface,
+                    colors = TextFieldDefaults.colors(focusedContainerColor = androidx.compose.ui.graphics.Color.Transparent,
+                        unfocusedContainerColor = androidx.compose.ui.graphics.Color.Transparent, disabledContainerColor = androidx.compose.ui.graphics.Color.Transparent,
                         focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
                         unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent, disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent),
                 )
@@ -591,6 +611,7 @@ private fun SettingsScreen(settings: AppSettings, authenticated: Boolean, model:
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 FontSetting(settings.font, model::font)
+                GlassSetting(settings.glass, model::glass)
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(w.text("Анимации", "Animations"), Modifier.weight(1f)); Switch(checked = settings.animations, onCheckedChange = model::animations)

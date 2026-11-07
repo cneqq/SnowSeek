@@ -13,6 +13,7 @@
 | Noto Sans | OFL-1.1 | https://github.com/google/fonts/tree/86aced91de05cd4f96a06838124cca45be337b2b/ofl/notosans |
 | Inter | OFL-1.1 | https://github.com/google/fonts/tree/86aced91de05cd4f96a06838124cca45be337b2b/ofl/inter |
 | Source Serif 4 | OFL-1.1 | https://github.com/google/fonts/tree/86aced91de05cd4f96a06838124cca45be337b2b/ofl/sourceserif4 |
+| Haze / Haze Glass 2.1.0, Chris Banes | Apache-2.0 | https://github.com/chrisbanes/haze/tree/2.1.0 |
 | Gradle Wrapper | Apache-2.0 | https://github.com/gradle/gradle |
 | JUnit 4 (только тесты) | EPL-1.0 | https://github.com/junit-team/junit4 |
 | Hamcrest (только тесты, транзитивно) | BSD-3-Clause | https://github.com/hamcrest/JavaHamcrest |

@@ -19,6 +19,23 @@ private val Context.snowSeekSettings by preferencesDataStore(name = "snowseek_se
 enum class ThemeMode { SYSTEM, LIGHT, DARK, CHARCOAL, BLACK }
 enum class FontMode { SYSTEM, STANDARD, APPLE_LIKE, ANTHROPIC_LIKE }
 
+data class GlassSettings(
+    val enabled: Boolean = false,
+    val blur: Float = 6f,
+    val refraction: Float = .55f,
+    val transparency: Float = .35f,
+    val enhanceColors: Boolean = false,
+) {
+    internal fun normalized() = copy(
+        blur = blur.finiteIn(0f..24f, 6f),
+        refraction = refraction.finiteIn(0f..1f, .55f),
+        transparency = transparency.finiteIn(0f..0.60f, .35f),
+    )
+
+    private fun Float.finiteIn(range: ClosedFloatingPointRange<Float>, fallback: Float) =
+        if (isFinite()) coerceIn(range) else fallback
+}
+
 data class AppSettings(
     val theme: ThemeMode = ThemeMode.SYSTEM,
     val font: FontMode = FontMode.SYSTEM,
@@ -27,6 +44,7 @@ data class AppSettings(
     val animations: Boolean = true,
     val welcomeComplete: Boolean = false,
     val customInstructions: List<ChatInstruction> = emptyList(),
+    val glass: GlassSettings = GlassSettings(),
 )
 
 class SettingsStore(context: Context) : AppliedInstructionStore {
@@ -43,6 +61,13 @@ class SettingsStore(context: Context) : AppliedInstructionStore {
             welcomeComplete = values[WELCOME] ?: false,
             customInstructions = values[INSTRUCTIONS]?.let { Json.decodeFromString<List<ChatInstruction>>(it) }
                 .orEmpty().filter { it.isValid() && it.id.startsWith("custom.") }.distinctBy { it.id },
+            glass = GlassSettings(
+                enabled = values[GLASS_ENABLED] ?: false,
+                blur = values[GLASS_BLUR] ?: 6f,
+                refraction = values[GLASS_REFRACTION] ?: .55f,
+                transparency = values[GLASS_TRANSPARENCY] ?: .35f,
+                enhanceColors = values[GLASS_COLORS] ?: false,
+            ).normalized(),
         )
     }
 
@@ -51,6 +76,16 @@ class SettingsStore(context: Context) : AppliedInstructionStore {
     suspend fun updateLanguage(value: String) { store.edit { it[LANGUAGE] = validLanguage(value) } }
     suspend fun updateTextScale(value: Float) { store.edit { it[TEXT_SCALE] = validScale(value) } }
     suspend fun updateAnimations(value: Boolean) { store.edit { it[ANIMATIONS] = value } }
+    suspend fun updateGlass(value: GlassSettings) {
+        val glass = value.normalized()
+        store.edit {
+            it[GLASS_ENABLED] = glass.enabled
+            it[GLASS_BLUR] = glass.blur
+            it[GLASS_REFRACTION] = glass.refraction
+            it[GLASS_TRANSPARENCY] = glass.transparency
+            it[GLASS_COLORS] = glass.enhanceColors
+        }
+    }
     suspend fun completeWelcome() { store.edit { it[WELCOME] = true } }
 
     suspend fun saveInstruction(instruction: ChatInstruction) {
@@ -83,6 +118,11 @@ class SettingsStore(context: Context) : AppliedInstructionStore {
         val TEXT_SCALE = floatPreferencesKey("text_scale")
         val ANIMATIONS = booleanPreferencesKey("animations")
         val WELCOME = booleanPreferencesKey("welcome_complete")
+        val GLASS_ENABLED = booleanPreferencesKey("composer_glass_enabled")
+        val GLASS_BLUR = floatPreferencesKey("composer_glass_blur")
+        val GLASS_REFRACTION = floatPreferencesKey("composer_glass_refraction")
+        val GLASS_TRANSPARENCY = floatPreferencesKey("composer_glass_transparency")
+        val GLASS_COLORS = booleanPreferencesKey("composer_glass_colors")
         fun validLanguage(value: String) = if (value == "en") "en" else "ru"
         fun validScale(value: Float) = if (value.isFinite()) value.coerceIn(0.7f, 1.5f) else 1f
     }

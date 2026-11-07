@@ -17,6 +17,7 @@ import dev.snowseek.app.auth.DeepSeekCredentials
 import dev.snowseek.app.data.DeepSeekHttpTransport
 import dev.snowseek.app.settings.AppSettings
 import dev.snowseek.app.settings.FontMode
+import dev.snowseek.app.settings.GlassSettings
 import dev.snowseek.app.settings.SettingsStore
 import dev.snowseek.app.settings.ThemeMode
 import dev.snowseek.core.ChatOptions
@@ -437,6 +438,7 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
     }
     fun theme(value: ThemeMode) = save { preferences.updateTheme(value) }
     fun font(value: FontMode) = save { preferences.updateFont(value) }
+    fun glass(value: GlassSettings) = save { preferences.updateGlass(value) }
     fun language(value: String) = save { preferences.updateLanguage(value) }
     fun textScale(value: Float) = save { preferences.updateTextScale(value) }
     fun animations(value: Boolean) = save { preferences.updateAnimations(value) }
