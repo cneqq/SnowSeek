@@ -10,7 +10,6 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
@@ -20,8 +19,11 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.chrisbanes.haze.HazeInput
 import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.blur.HazeBlurStyle
+import dev.chrisbanes.haze.blur.hazeBlur
 import dev.chrisbanes.haze.glass.GlassStyle
 import dev.chrisbanes.haze.glass.OpticalSizeValue
+import dev.chrisbanes.haze.glass.RefractionProfile
 import dev.chrisbanes.haze.glass.hazeGlass
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
@@ -72,24 +74,50 @@ internal fun ComposerSurface(
         Box {
             if (settings.enabled) {
                 if (backdrop != null && (blurRadius > 0.dp || refraction > 0f)) {
-                    val style = remember(refraction, colors.background) {
-                        GlassStyle.regular.then {
-                            shape(composerShape)
-                            backgroundColor(colors.background)
-                            tint(Color.Transparent)
-                            optics {
-                                copy(blurRadius = OpticalSizeValue.Fixed(0.dp), refractionStrength = refraction)
-                            }
-                            chromaMultiplier(1f)
-                        }
-                    }
-                    // Blur the sampled backdrop even when Glass uses its non-refracting renderer.
-                    Box(Modifier.matchParentSize().blur(blurRadius).hazeGlass(HazeInput.Sources(backdrop), style))
+                    ComposerBackdrop(Modifier.matchParentSize(), backdrop, blurRadius, refraction)
                 }
                 Box(Modifier.matchParentSize().background(colors.surface.copy(alpha = 1f - settings.transparency)))
             }
             content()
         }
+    }
+}
+
+@Composable
+private fun ComposerBackdrop(modifier: Modifier, backdrop: HazeState, radius: Dp, refraction: Float) {
+    val background = MaterialTheme.colorScheme.background
+    val source = HazeInput.Sources(backdrop)
+    val blur = radius > 0.dp
+    val glassStyle = remember(refraction, background) {
+        GlassStyle.regular.then {
+            shape(composerShape)
+            backgroundColor(background)
+            tint(Color.Transparent)
+            optics {
+                copy(
+                    blurRadius = OpticalSizeValue.Fixed(0.dp),
+                    refractionStrength = refraction,
+                    refractionDisplacement = 18.dp,
+                    refractionProfile = RefractionProfile.Edge(12.dp),
+                )
+            }
+            chromaMultiplier(1f)
+        }
+    }
+    val blurStyle = remember(radius, background) {
+        HazeBlurStyle {
+            blurRadius(radius)
+            backgroundColor(background)
+            noiseFactor(0f)
+            colorEffects(emptyList())
+        }
+    }
+    // Glass samples the blurred layer, while zero blur samples the original backdrop directly.
+    val lens = if (refraction > 0f) {
+        Modifier.hazeGlass(if (blur) HazeInput.Content else source, glassStyle)
+    } else Modifier
+    Box(modifier.then(lens)) {
+        if (blur) Box(Modifier.matchParentSize().hazeBlur(source, blurStyle))
     }
 }
 

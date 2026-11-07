@@ -58,6 +58,7 @@ dependencies {
     implementation("androidx.webkit:webkit:1.16.0")
     implementation("io.github.darriousliu:katex-core:0.3.2")
     implementation("dev.chrisbanes.haze:haze-glass:2.1.0")
+    implementation("dev.chrisbanes.haze:haze-blur:2.1.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
     implementation("androidx.datastore:datastore-preferences:1.3.0")
