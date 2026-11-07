@@ -95,24 +95,37 @@ fun MessageCard(message: ChatMessage) {
 @Composable
 private fun MarkdownText(source: String) {
     val blocks = remember(source) { parseMarkdown(source) }
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-        blocks.forEach { block ->
-            when (block) {
-                is MarkdownBlock.Code -> CodeBlock(block)
-                is MarkdownBlock.Heading -> SelectionContainer {
-                    Text(inlineMarkup(block.text), style = when (block.level) {
-                        1 -> MaterialTheme.typography.headlineSmall
-                        2 -> MaterialTheme.typography.titleLarge
-                        else -> MaterialTheme.typography.titleMedium
-                    }, fontWeight = FontWeight.SemiBold)
-                }
-                is MarkdownBlock.Paragraph -> SelectionContainer { Text(inlineMarkup(block.text), style = MaterialTheme.typography.bodyLarge, lineHeight = 25.sp) }
-                is MarkdownBlock.Bullet -> Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("•", color = MaterialTheme.colorScheme.primary)
-                    SelectionContainer { Text(inlineMarkup(block.text), style = MaterialTheme.typography.bodyLarge, lineHeight = 25.sp) }
-                }
-                is MarkdownBlock.Quote -> Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(10.dp)) {
-                    SelectionContainer { Text(inlineMarkup(block.text), Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium) }
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val textWidth = maxWidth
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            blocks.forEach { block ->
+                when (block) {
+                    is MarkdownBlock.Code -> CodeBlock(block)
+                    is MarkdownBlock.Heading -> SelectionContainer {
+                        MarkdownInline(block.text, textWidth, style = when (block.level) {
+                            1 -> MaterialTheme.typography.headlineSmall
+                            2 -> MaterialTheme.typography.titleLarge
+                            else -> MaterialTheme.typography.titleMedium
+                        }.copy(fontWeight = FontWeight.SemiBold))
+                    }
+                    is MarkdownBlock.Paragraph -> SelectionContainer {
+                        MarkdownInline(block.text, textWidth, style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 25.sp))
+                    }
+                    is MarkdownBlock.Bullet -> Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("•", Modifier.width(12.dp), color = MaterialTheme.colorScheme.primary)
+                        SelectionContainer {
+                            MarkdownInline(block.text, (textWidth - 22.dp).coerceAtLeast(0.dp),
+                                style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 25.sp))
+                        }
+                    }
+                    is MarkdownBlock.Quote -> Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(10.dp)) {
+                        SelectionContainer {
+                            MarkdownInline(block.text, (textWidth - 24.dp).coerceAtLeast(0.dp),
+                                Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                    is MarkdownBlock.Table -> MarkdownTable(block)
+                    is MarkdownBlock.Math -> MarkdownMath(block)
                 }
             }
         }
@@ -147,24 +160,6 @@ private fun CopyButton(text: String, description: String) {
     IconButton(onClick = { clipboard.setText(AnnotatedString(text)); copied = true }, enabled = text.isNotEmpty()) {
         Icon(if (copied) Icons.Outlined.Check else Icons.Outlined.ContentCopy, description, Modifier.size(17.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
     }
-}
-
-private val inlinePattern = Regex("\\*\\*(.+?)\\*\\*|`([^`]+)`|\\[([^]]+)]\\((https?://[^)]+)\\)")
-
-/** Small, deliberately non-HTML renderer; links stay selectable text and are never executed. */
-private fun inlineMarkup(source: String): AnnotatedString = buildAnnotatedString {
-    var end = 0
-    for (match in inlinePattern.findAll(source)) {
-        append(source.substring(end, match.range.first))
-        val start = length
-        when {
-            match.groups[1] != null -> { append(match.groupValues[1]); addStyle(SpanStyle(fontWeight = FontWeight.Bold), start, length) }
-            match.groups[2] != null -> { append(match.groupValues[2]); addStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = Color(0x224163EB)), start, length) }
-            else -> { append("${match.groupValues[3]} (${match.groupValues[4]})") }
-        }
-        end = match.range.last + 1
-    }
-    append(source.substring(end))
 }
 
 private val codeTokens = Regex("//[^\\n]*|#[^\\n]*|\"(?:\\\\.|[^\"\\\\])*\"|'(?:\\\\.|[^'\\\\])*'|\\b(?:val|var|fun|class|object|return|if|else|when|for|while|import|package|suspend|data|in|is|def|print|from|as|async|await|const|let|function|export|public|private|static|void|new|true|false|null|None|True|False)\\b|\\b[0-9]+(?:\\.[0-9]+)?\\b")
