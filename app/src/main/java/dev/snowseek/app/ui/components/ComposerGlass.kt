@@ -10,6 +10,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
@@ -59,30 +60,36 @@ internal fun ComposerSurface(
     content: @Composable () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
-    val glass = settings.enabled && backdrop != null
-    val style = remember(settings, colors.surface, colors.background) {
-        GlassStyle.regular.then {
-            shape(composerShape)
-            backgroundColor(colors.background)
-            tint(colors.surface.copy(alpha = 1f - settings.transparency))
-            optics {
-                copy(
-                    blurRadius = OpticalSizeValue.Fixed(settings.blur.dp),
-                    refractionStrength = settings.refraction,
-                )
-            }
-            chromaMultiplier(1f)
-        }
-    }
+    val blurRadius = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) settings.blur.dp else 0.dp
+    val refraction = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) settings.refraction else 0f
     Surface(
         shape = composerShape,
-        color = if (glass) Color.Transparent else colors.surface,
+        color = if (settings.enabled) Color.Transparent else colors.surface,
         contentColor = colors.onSurface,
         border = BorderStroke(1.dp, colors.outlineVariant),
         shadowElevation = 3.dp,
     ) {
-        val effect = if (glass) Modifier.hazeGlass(HazeInput.Sources(requireNotNull(backdrop)), style) else Modifier
-        Box(effect) { content() }
+        Box {
+            if (settings.enabled) {
+                if (backdrop != null && (blurRadius > 0.dp || refraction > 0f)) {
+                    val style = remember(refraction, colors.background) {
+                        GlassStyle.regular.then {
+                            shape(composerShape)
+                            backgroundColor(colors.background)
+                            tint(Color.Transparent)
+                            optics {
+                                copy(blurRadius = OpticalSizeValue.Fixed(0.dp), refractionStrength = refraction)
+                            }
+                            chromaMultiplier(1f)
+                        }
+                    }
+                    // Blur the sampled backdrop even when Glass uses its non-refracting renderer.
+                    Box(Modifier.matchParentSize().blur(blurRadius).hazeGlass(HazeInput.Sources(backdrop), style))
+                }
+                Box(Modifier.matchParentSize().background(colors.surface.copy(alpha = 1f - settings.transparency)))
+            }
+            content()
+        }
     }
 }
 
@@ -94,7 +101,8 @@ internal fun GlassEditor(settings: GlassSettings, onBack: () -> Unit, onApply: (
     var refraction by rememberSaveable { mutableFloatStateOf(settings.refraction) }
     var transparency by rememberSaveable { mutableFloatStateOf(settings.transparency) }
     val preview = GlassSettings(enabled, blur, refraction, transparency)
-    val supportsOptics = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+    val supportsBlur = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+    val supportsRefraction = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
 
     AppearancePage(
         title = w.text("Стекло панели ввода", "Composer glass"),
@@ -118,15 +126,20 @@ internal fun GlassEditor(settings: GlassSettings, onBack: () -> Unit, onApply: (
         Text(w.text("Предпросмотр", "Preview"), style = MaterialTheme.typography.labelMedium)
         GlassPreview(preview)
         if (enabled) {
-            if (supportsOptics) {
+            if (supportsBlur) {
                 AppearanceSlider(w.text("Размытие", "Blur"), "${blur.roundToInt()} dp", blur, 0f..24f, onChange = { blur = it })
+            }
+            if (supportsRefraction) {
                 AppearanceSlider(w.text("Преломление", "Refraction"), "${(refraction * 100).roundToInt()}%", refraction, 0f..1f,
                     onChange = { refraction = it })
             } else {
-                Text(w.text("Полный эффект стекла доступен с Android 13.", "The full glass effect requires Android 13 or later."),
+                Text(
+                    if (supportsBlur) w.text("Преломление доступно с Android 13.", "Refraction requires Android 13 or later.")
+                    else w.text("Размытие доступно с Android 12, преломление — с Android 13.",
+                        "Blur requires Android 12 or later, and refraction requires Android 13 or later."),
                     style = MaterialTheme.typography.bodySmall)
             }
-            AppearanceSlider(w.text("Прозрачность", "Transparency"), "${(transparency * 100).roundToInt()}%", transparency, 0f..0.60f,
+            AppearanceSlider(w.text("Прозрачность", "Transparency"), "${(transparency * 100).roundToInt()}%", transparency, 0f..1f,
                 onChange = { transparency = it })
         }
     }

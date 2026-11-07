@@ -28,7 +28,7 @@ data class GlassSettings(
     internal fun normalized() = copy(
         blur = blur.finiteIn(0f..24f, 6f),
         refraction = refraction.finiteIn(0f..1f, .55f),
-        transparency = transparency.finiteIn(0f..0.60f, .35f),
+        transparency = transparency.finiteIn(0f..1f, .35f),
     )
 
     private fun Float.finiteIn(range: ClosedFloatingPointRange<Float>, fallback: Float) =
