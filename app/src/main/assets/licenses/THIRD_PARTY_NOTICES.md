@@ -15,12 +15,10 @@
 | Source Serif 4 | OFL-1.1 | https://github.com/google/fonts/tree/86aced91de05cd4f96a06838124cca45be337b2b/ofl/sourceserif4 |
 | Haze / Haze Glass 2.1.0, Chris Banes | Apache-2.0 | https://github.com/chrisbanes/haze/tree/2.1.0 |
 | Gradle Wrapper | Apache-2.0 | https://github.com/gradle/gradle |
-| JUnit 4 (только тесты) | EPL-1.0 | https://github.com/junit-team/junit4 |
-| Hamcrest (только тесты, транзитивно) | BSD-3-Clause | https://github.com/hamcrest/JavaHamcrest |
 
-Apache-2.0 совместима с распространением объединённой работы под GPLv3 согласно GNU: https://www.gnu.org/licenses/license-list.html#apache2. Тестовые инструменты не включаются в APK. Android SDK/JDK являются инструментами сборки и не распространяются в репозитории.
+Apache-2.0 совместима с распространением объединённой работы под GPLv3 согласно GNU: https://www.gnu.org/licenses/license-list.html#apache2. Android SDK/JDK являются инструментами сборки и не распространяются в репозитории.
 
-Markdown разбирается средствами SnowSeek. Формулы LaTeX рисует KotlinTeX. Текст лицензии MIT включён в файл KotlinTeX-MIT.txt, а лицензии шрифтов входят в ресурсы KotlinTeX. При добавлении зависимостей проверяйте их лицензии и обновляйте этот файл; данная таблица перечисляет прямые зависимости и известные тестовые транзитивные компоненты, а не заменяет полный отчёт по всем транзитивным артефактам.
+Markdown разбирается средствами SnowSeek. Формулы LaTeX рисует KotlinTeX. Текст лицензии MIT включён в файл KotlinTeX-MIT.txt, а лицензии шрифтов входят в ресурсы KotlinTeX. При добавлении зависимостей проверяйте их лицензии и обновляйте этот файл; данная таблица перечисляет прямые зависимости, а не заменяет полный отчёт по всем транзитивным артефактам.
 
 Лицензии Noto Sans, Inter и Source Serif 4 хранятся в каталоге app/src/main/assets/licenses и доступны на экране лицензий приложения.
 

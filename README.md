@@ -19,7 +19,7 @@
 - Раскрываемые размышления и переключатели «Рассуждение»/«Поиск».
 - Системная, светлая, тёмно-синяя, тёмная и чёрная темы; русский/английский язык; масштаб текста и элементов 70–150%; переключатель анимаций. Настройки в DataStore.
 - Официальный сайт `https://chat.deepseek.com/` в отдельном WebView: загрузка, ошибки, повтор, навигация назад, открытие браузера, очистка веб-сессии.
-- Gradle Wrapper, unit-тесты, Android Lint, GitHub Actions с Debug APK и условным подписанным Release APK.
+- Gradle Wrapper, Android Lint, GitHub Actions с Debug APK и условным подписанным Release APK.
 - Оригинальная иконка-снежинка; нет рекламы, аналитики или собственного сервера.
 
 ## Получить и установить APK
@@ -74,16 +74,18 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 Linux/macOS:
 
 ```sh
-bash ./gradlew :core:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+bash ./gradlew :app:lintDebug :app:assembleDebug
 ```
 
 Windows PowerShell:
 
 ```powershell
-.\gradlew.bat :core:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+.\gradlew.bat :app:lintDebug :app:assembleDebug
 ```
 
 Результат: `app/build/outputs/apk/debug/app-debug.apk`. Первой сборке нужен интернет для Gradle, SDK и Maven-зависимостей. Wrapper проверяет SHA-256 дистрибутива Gradle.
+
+Для локальной release-сборки используйте задачи `:app:lintRelease :app:assembleRelease`. Gradle создаёт `app/build/outputs/apk/release/app-release-unsigned.apk`. Для установки подпишите APK своим release-ключом.
 
 ## Архитектура и границы интеграции
 
@@ -97,7 +99,7 @@ app/src/main/java/dev/snowseek/app/
 .github/workflows/android.yml
 ```
 
-`ChatProvider` определяет пользователя, чаты, сообщения, отправку, поток и остановку. Без аккаунта доступны только вход и настройки. `MockChatProvider` вынесен в локальные тестовые фикстуры и не включается в APK. После проверки и сохранения сессии используется `DeepSeekWebProvider`: профиль, список/создание/удаление чатов, история, отправка, SSE и THINK/RESPONSE. HTTP-транспорт использует платформенный HTTPS-клиент Android с проверкой TLS и запрещёнными редиректами. Ошибки и неоднозначный результат отправки не вызывают автоматическую повторную отправку.
+`ChatProvider` определяет пользователя, чаты, сообщения, отправку, поток и остановку. Без аккаунта доступны только вход и настройки. После проверки и сохранения сессии используется `DeepSeekWebProvider`: профиль, список/создание/удаление чатов, история, отправка, SSE и THINK/RESPONSE. HTTP-транспорт использует платформенный HTTPS-клиент Android с проверкой TLS и запрещёнными редиректами. Ошибки и неоднозначный результат отправки не вызывают автоматическую повторную отправку.
 
 Интеграция основана на ранее [проверенных HAR и HTTP/SSE-форматах](docs/web-integration-research.md). Отчёт фиксирует состояние исследования до реализации 0.2.0. Внутренние `/api/v0/*` не являются стабильным публичным API и могут измениться. Для каждой генерации запрашивается свежая PoW-задача и исполняется официальный Web Worker в WebView; обходов и собственного PoW-алгоритма нет. При недоступном worker или проверке сервиса показывается ошибка, ответ не подменяется демонстрацией.
 
@@ -171,7 +173,7 @@ Keystore декодируется только во временную папк�
 - Debug APK: проверены подпись (`apksigner`), выравнивание (`zipalign`), package `dev.snowseek.app`, min SDK 26 и target SDK 36. Release APK собран **без подписи**, для установки нужна подпись собственным ключом.
 - Workflow прошёл `actionlint`. Запуск GitHub Actions и публикация релиза не выполнялись.
 
-По просьбе владельца исходники тестов исключены из Git, но сохранены локально. CI выполняет lint и сборку APK; unit-тесты и JS-проверки запускаются локально при наличии файлов `src/test`. При устаревших результатах Android resource tasks используйте `:app:clean --no-build-cache` перед сборкой.
+Локальные тестовые исходники удалены 7 ноября 2026 года по просьбе владельца. CI выполняет lint и сборку APK. При устаревших результатах Android resource tasks используйте `:app:clean --no-build-cache` перед сборкой.
 
 Android-устройство или эмулятор не были подключены. Остаются проверки: ширина 320/360/412 dp; светлая/тёмная тема; увеличенный системный шрифт; длинные сообщения/код; клавиатура и прокрутка; stop во время генерации; перезапуск и восстановление; airplane mode; вход/CAPTCHA и выход с повторным открытием сайта. Компиляция и unit-тесты не доказывают работоспособность веб-входа или качество раскладки на устройстве.
 
@@ -187,7 +189,7 @@ SnowSeek is an **unofficial, open-source Android 8.0+ app**, not affiliated with
 
 For native chats, sign in with DeepSeek inside the app, or choose Google on its official form. The unchanged first-party Google authorize URL opens in the default browser. Android 12+ requires user approval for SnowSeek to handle chat.deepseek.com return links. The experimental /authorized nonce exchange is single-use, expires after 10 minutes, excludes previous credentials, verifies the new profile, and requires explicit account confirmation before encrypted persistence. Closing the browser is never considered successful sign-in. No browser cookies are extracted and no OAuth redirect URI is rewritten. This private web protocol is not a publicly supported third-party OAuth API.
 
-Build using JDK 17/21, Android SDK 37.0 and `bash ./gradlew :core:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug` (Windows: `gradlew.bat`). Install `app/build/outputs/apk/debug/app-debug.apk`. GitHub Actions uploads a Debug APK without secrets; signed releases require a pushed `v*` tag and all four signing secrets listed above. No release is published when secrets are incomplete.
+Build using JDK 17/21, Android SDK 37.0 and `bash ./gradlew :app:lintDebug :app:assembleDebug` (Windows: `gradlew.bat`). Install `app/build/outputs/apk/debug/app-debug.apk`. GitHub Actions uploads a Debug APK without secrets; signed releases require a pushed `v*` tag and all four signing secrets listed above. No release is published when secrets are incomplete.
 
 The private web integration is experimental and requires phone testing. Conversation pages load on sign-in and titles are searchable from the drawer. Stop sends `chat/stop_stream` with the assistant message ID before closing local reception. An early stop waits up to 10 seconds for that ID; an unconfirmed stop is reported and the partial reply is preserved. Failed/uncertain sends are never automatically repeated. Website protection and worker changes may require updating the app. No paid Developer API, proxy server, tracking or advertisements. GPLv3; see LICENSE and third-party notices.
 

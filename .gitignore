@@ -15,6 +15,6 @@ keystore.properties
 *.har
 *.har.gz
 
-# Tests are kept locally, outside version control, at the owner's request.
+# Keep temporary test sources out of version control.
 **/src/test/
 **/src/androidTest/

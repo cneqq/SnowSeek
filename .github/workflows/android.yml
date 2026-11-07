@@ -47,8 +47,6 @@ jobs:
         with:
           name: verification-reports
           path: |
-            core/build/reports/tests/
-            app/build/reports/tests/
             app/build/reports/lint-results-debug.*
           retention-days: 14
 
