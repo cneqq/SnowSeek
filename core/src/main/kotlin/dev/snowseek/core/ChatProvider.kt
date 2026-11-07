@@ -14,6 +14,12 @@ enum class MessageRole { USER, ASSISTANT }
 enum class MessageStatus { COMPLETE, GENERATING, STOPPED, ERROR }
 
 @Serializable
+data class ChatAttachment(val id: String, val name: String, val size: Long = 0, val status: String = "SUCCESS")
+
+/** A selected document is read only when the user explicitly attaches it. */
+data class UploadFile(val name: String, val contentType: String, val size: Long, val openStream: () -> java.io.InputStream)
+
+@Serializable
 data class ChatMessage(
     val id: String,
     val role: MessageRole,
@@ -22,6 +28,14 @@ data class ChatMessage(
     val status: MessageStatus = MessageStatus.COMPLETE,
     @EncodeDefault(EncodeDefault.Mode.ALWAYS)
     val createdAt: Long = System.currentTimeMillis(),
+    @kotlinx.serialization.Transient
+    val editable: Boolean = true,
+    @kotlinx.serialization.Transient
+    val continuable: Boolean = false,
+    @kotlinx.serialization.Transient
+    val regenerable: Boolean = true,
+    @kotlinx.serialization.Transient
+    val attachments: List<ChatAttachment> = emptyList(),
     val instruction: ChatInstruction? = null,
 )
 
@@ -32,6 +46,8 @@ data class ChatSession(
     val messages: List<ChatMessage> = emptyList(),
     @EncodeDefault(EncodeDefault.Mode.ALWAYS)
     val updatedAt: Long = System.currentTimeMillis(),
+    @kotlinx.serialization.Transient
+    val versions: Map<String, MessageVersions> = emptyMap(),
 )
 
 @Serializable
@@ -39,6 +55,8 @@ data class ChatOptions(
     val deepThink: Boolean = false,
     val search: Boolean = false,
     val language: String = "ru",
+    val attachments: List<ChatAttachment> = emptyList(),
+    val replaceAttachments: Boolean = false,
     val instruction: ChatInstruction? = null,
 )
 
@@ -69,6 +87,12 @@ interface ChatProvider {
     suspend fun deleteChat(chatId: String)
     suspend fun getMessages(chatId: String): List<ChatMessage>
     fun sendMessage(chatId: String, prompt: String, options: ChatOptions = ChatOptions()): Flow<ChatMessage>
+    fun editMessage(chatId: String, messageId: String, prompt: String, options: ChatOptions = ChatOptions()): Flow<ChatMessage> =
+        throw UnsupportedOperationException("Message editing is unavailable")
+    fun continueMessage(chatId: String, messageId: String): Flow<ChatMessage> =
+        throw UnsupportedOperationException("Continuing is unavailable")
+    fun regenerateMessage(chatId: String, messageId: String, options: ChatOptions = ChatOptions()): Flow<ChatMessage> =
+        throw UnsupportedOperationException("Regeneration is unavailable")
     suspend fun stopGeneration(chatId: String)
     suspend fun clear()
 }

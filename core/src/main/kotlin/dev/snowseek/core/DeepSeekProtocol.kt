@@ -8,10 +8,21 @@ interface DeepSeekTransport {
     suspend fun request(path: String, body: JsonObject? = null): JsonElement
     suspend fun solveOfficialChallenge(challenge: JsonObject): String
     fun completion(body: JsonObject, proof: String): Flow<DeepSeekFrame>
+    fun editMessage(body: JsonObject, proof: String): Flow<DeepSeekFrame> =
+        throw UnsupportedOperationException("Message editing is unavailable")
+    fun continueMessage(body: JsonObject): Flow<DeepSeekFrame> =
+        throw UnsupportedOperationException("Continuing is unavailable")
+    fun regenerateMessage(body: JsonObject, proof: String): Flow<DeepSeekFrame> =
+        throw UnsupportedOperationException("Regeneration is unavailable")
+    suspend fun uploadFile(file: UploadFile, proof: String, deepThink: Boolean): JsonElement =
+        throw UnsupportedOperationException("Attachments are unavailable")
     fun cancelCompletion()
 }
 data class DeepSeekFrame(val event: String, val data: String)
 open class DeepSeekFailure(message: String) : Exception(message)
+class DeepSeekConnectionFailure : DeepSeekFailure(
+    "Не удалось соединиться с DeepSeek. Проверьте сеть. / Could not connect to DeepSeek; check your network.",
+)
 class DeepSeekDeliveryUncertain(detail: String? = null) : DeepSeekFailure(
     "Отправка могла быть принята DeepSeek. Откройте диалог заново перед повтором. / Delivery may have succeeded; reload history before retrying." +
         (detail?.let { "\n$it" } ?: ""),
@@ -59,14 +70,19 @@ class DeepSeekStreamDecoder {
             else -> throw DeepSeekFailure("DeepSeek: unknown stream event")
         }
     }
-    fun message(fallbackId: String, status: MessageStatus = MessageStatus.GENERATING): ChatMessage {
+    fun message(fallbackId: String, status: MessageStatus = MessageStatus.GENERATING, previous: ChatMessage? = null): ChatMessage {
         val response = root["response"] as? JsonObject
+        if (response == null && previous != null) return previous.copy(id = responseId ?: fallbackId,
+            status = status, continuable = false)
         val fragments = response?.array("fragments").orEmpty().filterIsInstance<JsonObject>()
         return ChatMessage(responseId ?: response?.text("message_id") ?: fallbackId, MessageRole.ASSISTANT,
             fragments.filter { it.text("type") == "RESPONSE" }.joinToString("") { it.text("content").orEmpty() },
-            fragments.filter { it.text("type") == "THINK" }.joinToString("") { it.text("content").orEmpty() }, status)
+            fragments.filter { it.text("type") == "THINK" }.joinToString("") { it.text("content").orEmpty() }, status,
+            continuable = response?.text("status") == "INCOMPLETE",
+            regenerable = (response?.get("ban_regenerate") as? JsonPrimitive)?.booleanOrNull != true)
     }
     fun completed(): Boolean = closed && (root["response"] as? JsonObject)?.text("status") == "FINISHED"
+    fun incomplete(): Boolean = closed && (root["response"] as? JsonObject)?.text("status") == "INCOMPLETE"
     private fun apply(node: JsonElement, at: String, op: String, value: JsonElement): JsonElement {
         if (op == "BATCH") {
             var result = node

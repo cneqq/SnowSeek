@@ -5,13 +5,18 @@ package dev.snowseek.app.ui
 import android.content.Intent
 import androidx.core.net.toUri
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
@@ -23,9 +28,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import androidx.compose.material.icons.automirrored.outlined.ArrowForward
-import androidx.compose.material.icons.automirrored.outlined.Send
-import androidx.compose.material.icons.automirrored.outlined.OpenInNew
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -33,8 +37,17 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -64,21 +77,20 @@ fun SnowSeekApp(model: SnowSeekViewModel) {
     val openWeb = {
         context.startActivity(Intent(context, OfficialWebActivity::class.java).putExtra("language", settings.language))
     }
-    val openGoogle = {
-        context.startActivity(Intent(context, OfficialWebActivity::class.java).putExtra("language", settings.language).putExtra("google_mode", true))
-    }
-    SnowSeekTheme(if (!settings.welcomeComplete && ui.isDemo) settings.copy(theme = ThemeMode.DARK) else settings) {
-        CompositionLocalProvider(LocalWords provides words, LocalDemoMode provides ui.isDemo) {
+    SnowSeekTheme(settings) {
+        CompositionLocalProvider(LocalWords provides words) {
             Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                 if (!settingsReady) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-                } else if (!settings.welcomeComplete && ui.isDemo) {
-                    WelcomeScreen(onContinue = model::welcomeComplete, onWeb = openWeb, onGoogle = openGoogle, language = model::language)
                 } else if (showSettings) {
                     BackHandler { showSettings = false }
-                    SettingsScreen(settings, model, { showSettings = false }, openWeb, openGoogle)
+                    SettingsScreen(settings, ui.authenticated, model, { showSettings = false })
+                } else if (!ui.authenticated && (ui.loading || ui.sessionChanging)) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                } else if (!ui.authenticated) {
+                    SignInGate(onWeb = openWeb, onSettings = { showSettings = true })
                 } else {
-                    ChatScreen(ui, settings, model, { showSettings = true }, openWeb)
+                    ChatScreen(ui, settings, model, { showSettings = true })
                 }
             }
             if (ui.error) {
@@ -90,12 +102,12 @@ fun SnowSeekApp(model: SnowSeekViewModel) {
                         "Ответ пока не удалось получить. Обновите чат, чтобы проверить историю.",
                         "The reply is unavailable. Refresh the chat to check its history.",
                     ) else ui.errorMessage ?: words.text(
-                        "Проверьте свободное место и повторите попытку. Если локальная история повреждена, она сохранена без перезаписи. Веб-соединение проверяется отдельно на экране сайта.",
-                        "Check available storage and try again. A damaged local history is preserved without overwriting. Website connectivity is handled separately on the website screen.",
+                        "Проверьте соединение и повторите попытку.",
+                        "Check your connection and try again.",
                     )) },
                     confirmButton = { TextButton(onClick = {
                         model.dismissError()
-                        if (!ui.initialized) model.initialize() else ui.selectedId?.let(model::select)
+                        if (!ui.initialized) model.initialize() else model.refreshHistory()
                     }) { Text(if (ui.deliveryUncertain) words.text("Обновить чат", "Refresh chat") else words.text("Повторить", "Try again")) } },
                     dismissButton = { TextButton(onClick = model::dismissError) { Text(words.text("Закрыть", "Close")) } },
                 )
@@ -103,7 +115,7 @@ fun SnowSeekApp(model: SnowSeekViewModel) {
             if (ui.signedOut) {
                 AlertDialog(onDismissRequest = model::dismissError,
                     title = { Text(words.text("Веб-сессия очищена", "Website session cleared")) },
-                    text = { Text(words.text("Cookies и данные входа сайта удалены с этого устройства. Локальные демонстрационные чаты сохранены.", "Website cookies and sign-in data have been removed from this device. Local demo chats are kept.")) },
+                    text = { Text(words.text("Данные входа удалены с этого устройства.", "Sign-in data has been removed from this device.")) },
                     confirmButton = { TextButton(onClick = model::dismissError) { Text("OK") } })
             }
             if (ui.signingOut) {
@@ -116,68 +128,19 @@ fun SnowSeekApp(model: SnowSeekViewModel) {
 }
 
 @Composable
-private fun WelcomeScreen(onContinue: () -> Unit, onWeb: () -> Unit, onGoogle: () -> Unit, language: (String) -> Unit) {
+private fun SignInGate(onWeb: () -> Unit, onSettings: () -> Unit) {
     val w = LocalWords.current
-    Column(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 28.dp).verticalScrollCompat(),
-        horizontalAlignment = Alignment.CenterHorizontally) {
-        Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.End) {
-            TextButton(onClick = { language(if (w.language == "en") "ru" else "en") }) {
-                Icon(Icons.Outlined.Language, null, Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text(if (w.language == "en") "Русский" else "English")
-            }
-        }
+    Column(Modifier.fillMaxSize().safeDrawingPadding().verticalScrollCompat().padding(28.dp),
+        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        Text("SnowSeek", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(16.dp))
+        Text(w.text("Войдите в аккаунт для использования DeepSeek", "Sign in to use DeepSeek"),
+            style = MaterialTheme.typography.bodyLarge)
         Spacer(Modifier.height(28.dp))
-        BrandMark(80)
-        Spacer(Modifier.height(28.dp))
-        Text("SnowSeek", fontSize = 38.sp, fontWeight = FontWeight.Bold, letterSpacing = (-1).sp)
-        Spacer(Modifier.height(12.dp))
-        Text(w.text("Пространство для ваших мыслей", "A little space for big ideas"), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Spacer(Modifier.height(36.dp))
-        Surface(shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surface,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
-            Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
-                WelcomeFeature(Icons.Outlined.Forum, w.text("Ваши диалоги", "Your conversations"), w.text("Ответы в реальном времени и история чатов", "Real-time replies and conversation history"))
-                WelcomeFeature(Icons.Outlined.Shield, w.text("Ваше пространство", "Your space"), w.text("Без рекламы, трекеров и посредников", "No ads, trackers or intermediary servers"))
-                WelcomeFeature(Icons.Outlined.Science, w.text("Бесплатный аккаунт", "Free web account"), w.text("Вход на официальном сайте внутри SnowSeek", "Sign in on the official website inside SnowSeek"))
-            }
+        Button(onClick = onWeb, shape = CircleShape, modifier = Modifier.fillMaxWidth()) {
+            Text(w.text("Войти в DeepSeek", "Sign in to DeepSeek"))
         }
-        Spacer(Modifier.height(32.dp))
-        Button(onClick = onWeb, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp), shape = RoundedCornerShape(18.dp)) {
-            Text(w.text("Войти через DeepSeek", "Sign in with DeepSeek")); Spacer(Modifier.width(12.dp)); Icon(Icons.AutoMirrored.Outlined.ArrowForward, null)
-        }
-        Text(w.text("Войдите, чтобы открыть свои чаты здесь.",
-            "Sign in to open your chats here."),
-            modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Row(Modifier.fillMaxWidth().padding(vertical = 20.dp), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            HorizontalDivider(Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant)
-            Text(w.text("ИЛИ", "OR"), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            HorizontalDivider(Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant)
-        }
-        OutlinedButton(onClick = onGoogle, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp), shape = RoundedCornerShape(18.dp)) {
-            Icon(Icons.AutoMirrored.Outlined.OpenInNew, null, Modifier.size(20.dp)); Spacer(Modifier.width(10.dp))
-            Text(w.text("Войти через Google в браузере", "Sign in with Google in browser"))
-        }
-        Text(w.text("Подтвердите аккаунт в SnowSeek после входа в браузере.",
-            "Confirm your account in SnowSeek after signing in with your browser."),
-            modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        TextButton(onClick = onContinue, modifier = Modifier.padding(top = 8.dp)) { Text(w.text("Попробовать демочат", "Try the demo")) }
-        Spacer(Modifier.height(24.dp))
-        Text(w.text("Неофициальный клиент DeepSeek с открытым кодом.", "Unofficial open-source DeepSeek client."),
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Spacer(Modifier.height(28.dp))
-    }
-}
-
-@Composable
-private fun WelcomeFeature(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, description: String) {
-    Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-        Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 2.dp))
-        Column {
-            Text(title, style = MaterialTheme.typography.titleSmall)
-            Text(description, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
+        TextButton(onClick = onSettings, shape = CircleShape) { Text(w.text("Настройки", "Settings")) }
     }
 }
 
@@ -190,58 +153,103 @@ fun BrandMark(size: Int = 40) {
 }
 
 @Composable
-private fun ChatScreen(ui: ChatUiState, settings: AppSettings, model: SnowSeekViewModel, onSettings: () -> Unit, onWeb: () -> Unit) {
+private fun ChatScreen(ui: ChatUiState, settings: AppSettings, model: SnowSeekViewModel, onSettings: () -> Unit) {
     val w = LocalWords.current
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+    val keyboard = LocalSoftwareKeyboardController.current
+    val keyboardOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    var chatQuery by rememberSaveable { mutableStateOf("") }
+    val query = chatQuery.trim()
+    val visibleChats = remember(ui.chats, query, w) {
+        if (query.isEmpty()) ui.chats else ui.chats.filter { chatTitle(it, w).contains(query, ignoreCase = true) }
+    }
     var deleteId by rememberSaveable { mutableStateOf<String?>(null) }
     val current = ui.chats.firstOrNull { it.id == ui.selectedId }
+    val requests = remember(current?.messages) { current?.messages.orEmpty().filter { it.role == dev.snowseek.core.MessageRole.USER } }
+    var showRequests by rememberSaveable(current?.id) { mutableStateOf(false) }
+    var jumpToRequest by remember(current?.id) { mutableStateOf<String?>(null) }
     ModalNavigationDrawer(drawerState = drawer, drawerContent = {
-        ModalDrawerSheet(modifier = Modifier.widthIn(max = 320.dp), drawerContainerColor = MaterialTheme.colorScheme.surfaceVariant) {
+        ModalDrawerSheet(modifier = Modifier.widthIn(max = 320.dp).imePadding(), drawerContainerColor = MaterialTheme.colorScheme.surfaceVariant) {
             Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 BrandMark(); Text("SnowSeek", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             }
-            Button(onClick = { model.newChat(); scope.launch { drawer.close() } },
+            Button(onClick = { keyboard?.hide(); model.newChat(); scope.launch { drawer.close() } },
                 enabled = !ui.loading && !ui.generating && ui.initialized,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), shape = RoundedCornerShape(16.dp)) {
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), shape = CircleShape) {
                 Icon(Icons.Outlined.Add, null); Spacer(Modifier.width(8.dp)); Text(w.text("Новый чат", "New chat"))
             }
-            Text(if (ui.isDemo) w.text("НА УСТРОЙСТВЕ", "ON THIS DEVICE") else "DEEPSEEK", Modifier.padding(start = 24.dp, top = 28.dp, bottom = 8.dp),
-                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, letterSpacing = 1.5.sp)
+            OutlinedTextField(
+                value = chatQuery,
+                onValueChange = { chatQuery = it },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                label = { Text(w.text("Поиск чатов", "Search chats")) },
+                placeholder = { Text(w.text("По названию", "By title")) },
+                leadingIcon = { Icon(Icons.Outlined.Search, null) },
+                trailingIcon = if (chatQuery.isEmpty()) null else ({
+                    IconButton(onClick = { chatQuery = "" }) {
+                        Icon(Icons.Outlined.Close, w.text("Очистить поиск", "Clear search"))
+                    }
+                }),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
+            )
             LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 12.dp)) {
-                items(ui.chats, key = { it.id }) { chat ->
+                items(visibleChats, key = { it.id }) { chat ->
                     NavigationDrawerItem(
                         label = { Text(chatTitle(chat, w), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                         selected = chat.id == ui.selectedId,
-                        onClick = { model.select(chat.id); scope.launch { drawer.close() } },
+                        onClick = { keyboard?.hide(); model.select(chat.id); scope.launch { drawer.close() } },
                         icon = { Icon(Icons.Outlined.ChatBubbleOutline, null, Modifier.size(20.dp)) },
                         badge = { IconButton(onClick = { deleteId = chat.id }, enabled = !ui.generating && !ui.loading) {
                             Icon(Icons.Outlined.DeleteOutline, w.text("Удалить чат", "Delete chat"), Modifier.size(19.dp))
                         } }, modifier = Modifier.padding(vertical = 2.dp),
                     )
                 }
-                if (ui.chats.isEmpty()) item { Text(w.text("Здесь появятся ваши диалоги", "Your conversations will appear here"), Modifier.padding(16.dp), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                if (visibleChats.isEmpty()) item {
+                    when {
+                        !ui.initialized && ui.loading -> LinearProgressIndicator(Modifier.fillMaxWidth().padding(12.dp))
+                        !ui.initialized -> TextButton(onClick = model::initialize) {
+                            Text(w.text("Повторить загрузку чатов", "Retry loading chats"))
+                        }
+                        else -> Text(
+                            if (query.isEmpty()) w.text("В аккаунте пока нет чатов", "Your account has no chats yet")
+                            else w.text("Чаты с таким названием не найдены", "No matching chat titles"),
+                            Modifier.padding(16.dp), style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             }
-            HorizontalDivider(Modifier.padding(horizontal = 20.dp), color = MaterialTheme.colorScheme.outlineVariant)
-            TextButton(onClick = { scope.launch { drawer.close() }; onWeb() }, Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
-                Icon(Icons.AutoMirrored.Outlined.OpenInNew, null); Spacer(Modifier.width(12.dp)); Text(w.text("Официальный сайт", "Official website"))
+            if (!keyboardOpen) {
+                HorizontalDivider(Modifier.padding(horizontal = 20.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                TextButton(onClick = { scope.launch { drawer.close() }; onSettings() }, Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+                    Icon(Icons.Outlined.Settings, null); Spacer(Modifier.width(12.dp)); Text(w.text("Настройки", "Settings"))
+                }
+                Text("SnowSeek ${BuildConfig.VERSION_NAME} · GPLv3", Modifier.padding(24.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            TextButton(onClick = { scope.launch { drawer.close() }; onSettings() }, Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
-                Icon(Icons.Outlined.Settings, null); Spacer(Modifier.width(12.dp)); Text(w.text("Настройки", "Settings"))
-            }
-            Text("SnowSeek ${BuildConfig.VERSION_NAME} · GPLv3", Modifier.padding(24.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }) {
         BackHandler(enabled = drawer.isOpen) { scope.launch { drawer.close() } }
         Scaffold(containerColor = MaterialTheme.colorScheme.background,
             topBar = {
                 CenterAlignedTopAppBar(
-                    title = { Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(current?.let { chatTitle(it, w) } ?: "SnowSeek", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                        Text(if (ui.isDemo) w.text("Локальная демонстрация", "Local demo") else "DeepSeek · Web", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                    } },
+                    title = {
+                        Text(current?.let { chatTitle(it, w) } ?: "SnowSeek",
+                            modifier = if (requests.isEmpty()) Modifier else Modifier.clickable(
+                                onClickLabel = w.text("История запросов", "Request history"),
+                                onClick = { showRequests = true },
+                            ).padding(vertical = 10.dp),
+                            maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    },
                     navigationIcon = { IconButton(onClick = { scope.launch { drawer.open() } }) { Icon(Icons.Outlined.Menu, w.text("История чатов", "Chat history")) } },
-                    actions = { IconButton(onClick = model::newChat, enabled = !ui.generating && !ui.loading && ui.initialized) { Icon(Icons.Outlined.Edit, w.text("Новый чат", "New chat")) } },
+                    actions = { IconButton(onClick = model::newChat,
+                        modifier = Modifier.padding(end = 8.dp),
+                        enabled = !ui.generating && !ui.loading && !ui.uploading && ui.initialized) {
+                        RoundNewChatIcon(w.text("Новый чат", "New chat"))
+                    } },
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
                 )
             },
@@ -251,64 +259,107 @@ private fun ChatScreen(ui: ChatUiState, settings: AppSettings, model: SnowSeekVi
                 if (!ui.initialized && !ui.loading) {
                     Column(Modifier.weight(1f).fillMaxWidth().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                         Icon(Icons.Outlined.ErrorOutline, null, tint = MaterialTheme.colorScheme.error)
-                        Text(if (ui.isDemo) w.text("Не удалось прочитать локальную историю", "Could not read local history") else w.text("Не удалось подключиться к DeepSeek. Проверьте вход в настройках.", "Could not connect to DeepSeek. Check sign-in in settings."), Modifier.padding(vertical = 16.dp))
+                        Text(w.text("Не удалось подключиться. Проверьте соединение и повторите попытку.", "Could not connect. Check your connection and try again."), Modifier.padding(vertical = 16.dp))
                         Button(onClick = model::initialize) { Text(w.text("Повторить", "Try again")) }
                     }
                 } else if (current?.messages.isNullOrEmpty()) {
-                    EmptyChat(Modifier.weight(1f), model::input)
+                    EmptyChat(current?.id ?: "empty-start", Modifier.weight(1f))
                 } else {
-                    MessageList(current, settings.animations, Modifier.weight(1f))
+                    key(current.id) { MessageList(current, settings.animations, Modifier.weight(1f),
+                        canAct = ui.authenticated && !ui.generating && !ui.loading && !ui.uploading,
+                        onEdit = model::editMessage, onContinue = model::continueMessage,
+                        onRegenerate = model::regenerateMessage, onVersion = model::switchVersion,
+                        canSwitchVersion = ui.editingMessageId == null,
+                        jumpToRequest = jumpToRequest, onJumpHandled = { jumpToRequest = null }) }
                 }
                 Composer(ui, model)
             }
         }
     }
+    if (showRequests && requests.isNotEmpty()) AlertDialog(
+        onDismissRequest = { showRequests = false },
+        title = { Text(w.text("История запросов", "Request history")) },
+        text = {
+            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 420.dp)) {
+                itemsIndexed(requests, key = { _, message -> message.id }) { index, message ->
+                    val preview = message.text.trim().take(240).replace(Regex("\\s+"), " ")
+                        .ifBlank { message.attachments.firstOrNull()?.name.orEmpty() }
+                    ListItem(
+                        headlineContent = { Text(preview.ifBlank { w.text("Вложение", "Attachment") }, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+                        leadingContent = { Text("${index + 1}") },
+                        colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                        modifier = Modifier.clickable {
+                            jumpToRequest = message.id
+                            showRequests = false
+                        },
+                    )
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { showRequests = false }) { Text(w.text("Закрыть", "Close")) } },
+    )
     if (deleteId != null) AlertDialog(onDismissRequest = { deleteId = null },
         title = { Text(w.text("Удалить диалог?", "Delete this conversation?")) },
-        text = { Text(if (ui.isDemo) w.text("История этого демонстрационного чата будет удалена с устройства.", "This demo conversation will be removed from this device.") else w.text("Диалог будет удалён из аккаунта DeepSeek. Отменить это действие нельзя.", "This conversation will be deleted from your DeepSeek account. This cannot be undone.")) },
+        text = { Text(w.text("Диалог будет удалён из аккаунта. Отменить это действие нельзя.", "This conversation will be deleted from your account. This cannot be undone.")) },
         confirmButton = { TextButton(onClick = { deleteId?.let(model::deleteChat); deleteId = null }) { Text(w.text("Удалить", "Delete")) } },
         dismissButton = { TextButton(onClick = { deleteId = null }) { Text(w.text("Отмена", "Cancel")) } })
 }
 
+@Composable
+private fun RoundNewChatIcon(description: String) {
+    val color = LocalContentColor.current
+    Canvas(Modifier.size(25.dp).semantics { contentDescription = description }) {
+        val unit = size.minDimension / 24f
+        val bubble = Path().apply {
+            moveTo(12f * unit, 3f * unit)
+            cubicTo(17f * unit, 3f * unit, 21f * unit, 7f * unit, 21f * unit, 12f * unit)
+            cubicTo(21f * unit, 17f * unit, 17f * unit, 21f * unit, 12f * unit, 21f * unit)
+            cubicTo(10f * unit, 21f * unit, 8f * unit, 20.4f * unit, 6.5f * unit, 19f * unit)
+            lineTo(3f * unit, 21f * unit); lineTo(4f * unit, 16.5f * unit)
+            cubicTo(3.3f * unit, 15f * unit, 3f * unit, 13.5f * unit, 3f * unit, 12f * unit)
+            cubicTo(3f * unit, 7f * unit, 7f * unit, 3f * unit, 12f * unit, 3f * unit)
+            close()
+        }
+        drawPath(bubble, color, style = Stroke(1.7f * unit, cap = StrokeCap.Round))
+        drawLine(color, Offset(8f * unit, 12f * unit), Offset(16f * unit, 12f * unit), 1.7f * unit, StrokeCap.Round)
+        drawLine(color, Offset(12f * unit, 8f * unit), Offset(12f * unit, 16f * unit), 1.7f * unit, StrokeCap.Round)
+    }
+}
+
 private fun chatTitle(chat: ChatSession, w: Words): String =
-    if (chat.messages.isEmpty()) w.text("Новый чат", "New chat") else chat.title
+    chat.title.ifBlank { w.text("Новый чат", "New chat") }
 
 @Composable
-private fun EmptyChat(modifier: Modifier, onSuggestion: (String) -> Unit) {
+private fun EmptyChat(chatId: String, modifier: Modifier) {
     val w = LocalWords.current
-    Column(modifier.fillMaxWidth().verticalScrollCompat().padding(horizontal = 28.dp, vertical = 24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-        BrandMark(68)
-        Spacer(Modifier.height(24.dp))
-        Text(w.text("С чего начнём?", "What’s on your mind?"), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.height(10.dp))
-        Text(w.text("Место для идей, вопросов и маленьких открытий.", "A space for ideas, questions and little discoveries."), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
-        Spacer(Modifier.height(30.dp))
-        listOf(
-            Triple(Icons.Outlined.Code, w.text("Покажи пример кода на Kotlin", "Show me a Kotlin code example"), w.text("Немного кода", "A little code")),
-            Triple(Icons.Outlined.Lightbulb, w.text("Помоги придумать идею для проекта", "Help me find an idea for a project"), w.text("Новая идея", "A new idea")),
-            Triple(Icons.Outlined.AutoAwesome, w.text("Что умеет SnowSeek?", "What can SnowSeek do?"), w.text("Знакомство", "Meet SnowSeek")),
-        ).forEach { (icon, prompt, label) ->
-            OutlinedCard(onClick = { onSuggestion(prompt) }, modifier = Modifier.fillMaxWidth().padding(vertical = 5.dp),
-                shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
-                Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-                    Text(label, style = MaterialTheme.typography.bodyMedium)
-                    Spacer(Modifier.weight(1f)); Icon(Icons.AutoMirrored.Outlined.ArrowForward, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-        }
+    val greeting by rememberSaveable(chatId) { mutableIntStateOf(kotlin.random.Random.nextInt(4)) }
+    val greetings = listOf(
+        w.text("Привет! О чём хотите поговорить сегодня?", "Hi! What would you like to talk about today?"),
+        w.text("Какая мысль занимает вас сегодня?", "What’s on your mind today?"),
+        w.text("Давайте разберёмся вместе. С чего начнём?", "Let’s think it through together. Where shall we start?"),
+        w.text("Чем могу помочь сегодня?", "How can I help today?"),
+    )
+    Box(modifier.fillMaxWidth().verticalScrollCompat().padding(32.dp), contentAlignment = Alignment.Center) {
+        Text(greetings[greeting], style = MaterialTheme.typography.headlineSmall,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center, fontWeight = FontWeight.Medium)
     }
 }
 
 @Composable
-private fun MessageList(chat: ChatSession, animations: Boolean, modifier: Modifier) {
+private fun MessageList(
+    chat: ChatSession, animations: Boolean, modifier: Modifier, canAct: Boolean,
+    onEdit: (String) -> Unit, onContinue: (String) -> Unit, onRegenerate: (String) -> Unit,
+    onVersion: (String, String) -> Unit, canSwitchVersion: Boolean,
+    jumpToRequest: String?, onJumpHandled: () -> Unit,
+) {
+    val words = LocalWords.current
     val listState = rememberLazyListState()
     val last = chat.messages.lastOrNull()
+    val lastAssistant = chat.messages.lastOrNull { it.role == dev.snowseek.core.MessageRole.ASSISTANT }
     val dragged by listState.interactionSource.collectIsDraggedAsState()
     var followLatest by remember(chat.id) { mutableStateOf(true) }
     val atBottom by remember { derivedStateOf {
-        listState.layoutInfo.visibleItemsInfo.lastOrNull()?.key == "conversation-bottom"
+        !listState.canScrollForward
     } }
     LaunchedEffect(dragged) {
         if (dragged) followLatest = false
@@ -318,11 +369,21 @@ private fun MessageList(chat: ChatSession, animations: Boolean, modifier: Modifi
     LaunchedEffect(chat.id) {
         if (chat.messages.isNotEmpty()) listState.scrollToItem(chat.messages.size)
     }
-    LaunchedEffect(last?.id, last?.text?.length, last?.reasoning?.length, followLatest, dragged) {
+    LaunchedEffect(jumpToRequest) {
+        if (jumpToRequest == null) return@LaunchedEffect
+        val index = chat.messages.indexOfFirst { it.id == jumpToRequest }
+        if (index >= 0) {
+            followLatest = false
+            listState.scrollToItem(index)
+        }
+        onJumpHandled()
+    }
+    LaunchedEffect(last?.id, last?.text?.length, last?.reasoning?.length, last?.status, followLatest, dragged) {
         if (followLatest && !dragged && chat.messages.isNotEmpty()) {
             // Scroll to a separate trailing item, so even a reply taller than the viewport ends visibly.
             val index = chat.messages.size
-            if (animations) listState.animateScrollToItem(index) else listState.scrollToItem(index)
+            // A token must not restart a slow animation and fight the next token's scroll.
+            listState.scrollToItem(index)
         }
     }
     Box(modifier.fillMaxWidth()) {
@@ -330,7 +391,42 @@ private fun MessageList(chat: ChatSession, animations: Boolean, modifier: Modifi
             items(chat.messages, key = { it.id }) { message ->
                 var visible by remember(message.id) { mutableStateOf(!animations) }
                 LaunchedEffect(message.id) { visible = true }
-                AnimatedVisibility(visible = visible, enter = fadeIn(), exit = fadeOut()) { MessageCard(message) }
+                AnimatedVisibility(visible = visible, enter = fadeIn(), exit = fadeOut()) {
+                    Column {
+                        MessageCard(message, onReasoningToggle = { followLatest = false },
+                            animateStreaming = animations,
+                            onReveal = {
+                                if (message.id == last?.id && followLatest && !dragged) {
+                                    listState.requestScrollToItem(chat.messages.size)
+                                }
+                            },
+                            onEdit = if (message.role == dev.snowseek.core.MessageRole.USER) ({ onEdit(message.id) }) else null,
+                            onContinue = if (canAct && message.id == lastAssistant?.id && message.continuable &&
+                                message.id.toLongOrNull() != null) ({ onContinue(message.id) }) else null,
+                            onRegenerate = if (canAct && message.role == dev.snowseek.core.MessageRole.ASSISTANT &&
+                                message.regenerable && message.id.toLongOrNull() != null) ({ onRegenerate(message.id) }) else null)
+                        chat.versions[message.id]?.let { version ->
+                            Row(Modifier.align(Alignment.End), verticalAlignment = Alignment.CenterVertically) {
+                                fun changeVersion(index: Int) {
+                                    val target = version.ids.getOrNull(index) ?: return
+                                    val position = chat.messages.indexOfFirst { it.id == message.id }
+                                    followLatest = false
+                                    onVersion(message.id, target)
+                                    if (position >= 0) listState.requestScrollToItem(position)
+                                }
+                                IconButton(enabled = canAct && canSwitchVersion && version.index > 0,
+                                    onClick = { changeVersion(version.index - 1) }) {
+                                    Icon(Icons.AutoMirrored.Outlined.KeyboardArrowLeft, words.text("Предыдущая версия", "Previous version"))
+                                }
+                                Text("${version.index + 1}/${version.ids.size}", style = MaterialTheme.typography.labelMedium)
+                                IconButton(enabled = canAct && canSwitchVersion && version.index < version.ids.lastIndex,
+                                    onClick = { changeVersion(version.index + 1) }) {
+                                    Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, words.text("Следующая версия", "Next version"))
+                                }
+                            }
+                        }
+                    }
+                }
             }
             item(key = "conversation-bottom") { Spacer(Modifier.height(1.dp)) }
         }
@@ -349,48 +445,119 @@ private fun MessageList(chat: ChatSession, animations: Boolean, modifier: Modifi
 private fun Composer(ui: ChatUiState, model: SnowSeekViewModel) {
     val w = LocalWords.current
     val keyboard = LocalSoftwareKeyboardController.current
+    val focusRequester = remember { FocusRequester() }
+    val attachmentPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) model.attachFiles(uris)
+    }
+    val canSend = ui.initialized && !ui.loading && !ui.uploading &&
+        (ui.input.isNotBlank() || ui.attachments.isNotEmpty())
+    LaunchedEffect(ui.editingMessageId) {
+        if (ui.editingMessageId != null) {
+            focusRequester.requestFocus()
+            keyboard?.show()
+        }
+    }
     Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp).padding(bottom = 16.dp)) {
         Surface(shape = RoundedCornerShape(26.dp), color = MaterialTheme.colorScheme.surface,
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), shadowElevation = 3.dp) {
             Column(Modifier.padding(8.dp)) {
                 InstructionSelector(ui, model)
+                if (ui.editingMessageId != null) {
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(w.text("Изменение сообщения", "Editing message"), Modifier.weight(1f),
+                                style = MaterialTheme.typography.labelLarge)
+                            TextButton(onClick = model::cancelEdit, enabled = !ui.generating && !ui.uploading) {
+                                Text(w.text("Отмена", "Cancel"))
+                            }
+                        }
+                        Text(w.text("После сохранения ответ будет создан заново с этого места.",
+                            "Saving generates a new reply from this point."), style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
                 TextField(value = ui.input, onValueChange = model::input,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp, max = 180.dp),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp, max = 180.dp).focusRequester(focusRequester),
                     placeholder = { Text(w.text("Спросите что-нибудь…", "Ask anything…"), style = MaterialTheme.typography.bodyLarge) },
-                    enabled = ui.initialized && !ui.loading, maxLines = 6,
+                    enabled = ui.initialized && !ui.loading && !(ui.generating && ui.editingMessageId != null), maxLines = 6,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
-                    keyboardActions = KeyboardActions(onSend = { keyboard?.hide(); model.send() }),
+                    keyboardActions = KeyboardActions(onSend = { if (canSend && !ui.generating) { keyboard?.hide(); model.send() } }),
                     colors = TextFieldDefaults.colors(focusedContainerColor = MaterialTheme.colorScheme.surface,
                         unfocusedContainerColor = MaterialTheme.colorScheme.surface, disabledContainerColor = MaterialTheme.colorScheme.surface,
                         focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
                         unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent, disabledIndicatorColor = androidx.compose.ui.graphics.Color.Transparent),
                 )
-                Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    FlowRow(modifier = Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    FilterChip(selected = ui.deepThink, onClick = model::deepThink, enabled = !ui.generating,
-                        label = { Text("DeepThink", fontSize = 12.sp) },
-                        leadingIcon = { Icon(Icons.Outlined.Psychology, null, Modifier.size(16.dp)) })
-                    FilterChip(selected = ui.search, onClick = model::search, enabled = !ui.generating,
-                        label = { Text(w.text("Поиск", "Search"), fontSize = 12.sp) },
-                        leadingIcon = { Icon(Icons.Outlined.Language, null, Modifier.size(16.dp)) })
+                if (ui.attachments.isNotEmpty()) {
+                    FlowRow(Modifier.fillMaxWidth().heightIn(max = 120.dp).verticalScroll(rememberScrollState()).padding(horizontal = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        ui.attachments.forEach { attachment ->
+                            InputChip(selected = false, onClick = {}, modifier = Modifier.widthIn(max = 260.dp),
+                                label = { Text(attachment.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                leadingIcon = { Icon(Icons.Outlined.AttachFile, null, Modifier.size(16.dp)) },
+                                trailingIcon = {
+                                    IconButton(onClick = { model.removeAttachment(attachment.id) },
+                                        enabled = !ui.generating && !ui.uploading, modifier = Modifier.size(24.dp)) {
+                                        Icon(Icons.Outlined.Close, w.text("Удалить вложение", "Remove attachment"), Modifier.size(16.dp))
+                                    }
+                                })
+                        }
                     }
-                    FilledIconButton(onClick = { if (ui.generating) model.stop() else { keyboard?.hide(); model.send() } },
-                        enabled = ui.generating || (ui.input.isNotBlank() && ui.initialized && !ui.loading),
-                        modifier = Modifier.size(46.dp), shape = CircleShape) {
-                        Icon(if (ui.generating) Icons.Outlined.Stop else Icons.AutoMirrored.Outlined.Send,
-                            w.text(if (ui.generating) "Остановить ответ" else "Отправить сообщение", if (ui.generating) "Stop generating" else "Send message"), Modifier.size(21.dp))
+                }
+                if (ui.uploading) {
+                    Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Text(w.text("Загрузка вложений…", "Uploading attachments…"), style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+                BoxWithConstraints(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+                    val options: @Composable (Modifier) -> Unit = { modifier ->
+                        FlowRow(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            FilterChip(selected = ui.deepThink, onClick = model::deepThink,
+                                enabled = !ui.generating && !ui.uploading, shape = CircleShape,
+                                label = { Text(w.text("Рассуждение", "Reasoning"), fontSize = 12.sp) },
+                                leadingIcon = { Icon(Icons.Outlined.Psychology, null, Modifier.size(16.dp)) })
+                            FilterChip(selected = ui.search, onClick = model::search,
+                                enabled = !ui.generating && !ui.uploading, shape = CircleShape,
+                                label = { Text(w.text("Поиск", "Search"), fontSize = 12.sp) },
+                                leadingIcon = { Icon(Icons.Outlined.Language, null, Modifier.size(16.dp)) })
+                        }
+                    }
+                    val actions: @Composable () -> Unit = {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            IconButton(onClick = { attachmentPicker.launch(arrayOf("*/*")) },
+                                enabled = ui.initialized && !ui.generating && !ui.loading && !ui.uploading) {
+                                Icon(Icons.Outlined.AttachFile, w.text("Добавить вложения", "Add attachments"), Modifier.size(22.dp))
+                            }
+                            FilledIconButton(onClick = {
+                                if (ui.generating) model.stop() else { keyboard?.hide(); model.send() }
+                            }, enabled = ui.generating || canSend, modifier = Modifier.size(46.dp), shape = CircleShape) {
+                                Icon(if (ui.generating) Icons.Outlined.Stop else Icons.Outlined.ArrowUpward,
+                                    if (ui.generating) w.text("Остановить ответ", "Stop generating")
+                                    else if (ui.editingMessageId != null) w.text("Сохранить изменение", "Save edit")
+                                    else w.text("Отправить сообщение", "Send message"), Modifier.size(21.dp))
+                            }
+                        }
+                    }
+                    if (maxWidth < 300.dp) {
+                        Column(Modifier.fillMaxWidth()) {
+                            options(Modifier.fillMaxWidth())
+                            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) { actions() }
+                        }
+                    } else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        options(Modifier.weight(1f))
+                        actions()
                     }
                 }
             }
         }
-        Text(if (ui.isDemo) w.text("Демо · ответы, DeepThink и поиск моделируются на устройстве", "Demo · replies, DeepThink and search are simulated on-device") else w.text("DeepSeek · ответы могут содержать ошибки", "DeepSeek · answers may contain mistakes"),
-            Modifier.padding(horizontal = 8.dp, vertical = 10.dp), style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
+
     }
 }
 
 @Composable
-private fun SettingsScreen(settings: AppSettings, model: SnowSeekViewModel, onBack: () -> Unit, onWeb: () -> Unit, onGoogle: () -> Unit) {
+private fun SettingsScreen(settings: AppSettings, authenticated: Boolean, model: SnowSeekViewModel, onBack: () -> Unit) {
     val w = LocalWords.current
     var logoutConfirmation by rememberSaveable { mutableStateOf(false) }
     var showLicenses by rememberSaveable { mutableStateOf(false) }
@@ -421,9 +588,9 @@ private fun SettingsScreen(settings: AppSettings, model: SnowSeekViewModel, onBa
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(w.text("Анимации", "Animations"), Modifier.weight(1f)); Switch(checked = settings.animations, onCheckedChange = model::animations)
                 }
-                Text(w.text("Размер текста", "Text size") + " · ${(settings.textScale * 100).toInt()}%", style = MaterialTheme.typography.titleSmall)
+                Text(w.text("Масштаб интерфейса", "Interface scale") + " · ${(settings.textScale * 100).toInt()}%", style = MaterialTheme.typography.titleSmall)
                 var textSize by remember(settings.textScale) { mutableFloatStateOf(settings.textScale) }
-                Slider(value = textSize, onValueChange = { textSize = it }, onValueChangeFinished = { model.textScale(textSize) }, valueRange = .85f..1.3f, steps = 8)
+                Slider(value = textSize, onValueChange = { textSize = it }, onValueChangeFinished = { model.textScale(textSize) }, valueRange = .7f..1.5f, steps = 15)
             }
             SettingGroup(w.text("ЯЗЫК", "LANGUAGE")) {
                 listOf("ru" to "Русский", "en" to "English").forEach { (code, name) ->
@@ -433,19 +600,14 @@ private fun SettingsScreen(settings: AppSettings, model: SnowSeekViewModel, onBa
                     }
                 }
             }
-            SettingGroup(w.text("ПОДКЛЮЧЕНИЕ", "CONNECTION")) {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Icon(Icons.Outlined.Science, null, tint = MaterialTheme.colorScheme.primary)
-                    Column {
-                        Text(if (LocalDemoMode.current) w.text("Демонстрационный провайдер", "Demo provider") else "DeepSeek · Web", style = MaterialTheme.typography.titleSmall)
-                        Text(w.text("Войдите через DeepSeek внутри приложения. Аккаунт подключится автоматически после проверки. Приватный веб-протокол может измениться.", "Sign in with DeepSeek inside the app. Your account connects automatically after verification. The private web protocol may change."), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            SettingGroup(w.text("АККАУНТ", "ACCOUNT")) {
+                if (authenticated) {
+                    TextButton(onClick = { logoutConfirmation = true }, shape = CircleShape,
+                        modifier = Modifier.fillMaxWidth()) {
+                        Text(w.text("Выйти из аккаунта", "Sign out"), color = MaterialTheme.colorScheme.error)
                     }
-                }
-                OutlinedButton(onClick = onWeb, modifier = Modifier.fillMaxWidth()) { Text(w.text("Войти через DeepSeek", "Sign in with DeepSeek")) }
-                OutlinedButton(onClick = onGoogle, modifier = Modifier.fillMaxWidth()) { Text(w.text("Войти через Google в браузере", "Sign in with Google in browser")) }
-                Text(w.text("После Google-входа вернитесь в SnowSeek и подтвердите аккаунт.", "Return to SnowSeek after Google sign-in and confirm your account."),
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                TextButton(onClick = { logoutConfirmation = true }, modifier = Modifier.fillMaxWidth()) { Text(w.text("Выйти из веб-аккаунта", "Sign out of website account"), color = MaterialTheme.colorScheme.error) }
+                } else Text(w.text("Аккаунт не подключён", "No account connected"),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             SettingGroup(w.text("О ПРИЛОЖЕНИИ", "ABOUT")) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {

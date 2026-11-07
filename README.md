@@ -2,18 +2,22 @@
 
 Неофициальный открытый Android-клиент с нативным интерфейсом для дальнейшего исследования интеграции DeepSeek. **Не связан с DeepSeek и не одобрен им.** Android 8.0+ (API 26).
 
-**Экспериментальная интеграция бесплатной веб-версии DeepSeek с нативным чатом.** Вход по почте выполняется внутри приложения. Для Google нажмите отдельную кнопку, затем Google на официальной форме DeepSeek: сайт подготовит ссылку для браузера. После входа вернитесь в SnowSeek и подтвердите проверенный аккаунт. На Android 12+ необходимо один раз разрешить открытие ссылки завершения входа в настройках приложения. До подключения доступен локальный демочат. Платный Developer API не используется.
+**Экспериментальная интеграция бесплатной веб-версии DeepSeek с нативным чатом.** Вход по почте выполняется внутри приложения. Для Google нажмите отдельную кнопку, затем Google на официальной форме DeepSeek: сайт подготовит ссылку для браузера. После входа вернитесь в SnowSeek и подтвердите проверенный аккаунт. На Android 12+ необходимо один раз разрешить открытие ссылки завершения входа в настройках приложения. До подключения доступны настройки и форма входа; чаты открываются только после подключения аккаунта. Платный Developer API не используется.
 
 ## Что реализовано
 
 - Kotlin, Jetpack Compose и Material 3, MVVM, Coroutines/Flow.
 - Инструкции для нового чата: «Кратко и по делу», «Объясни понятно» и свои шаблоны с созданием, редактированием и удалением. Выбор закрепляется первым сообщением; в SnowSeek над ним показано название, текст инструкции в чате скрыт. DeepSeek получает текст правил вместе с первым сообщением. Название и ID хранятся на устройстве; при просмотре истории на другом устройстве полный запрос может быть виден. Свои шаблоны хранятся локально в DataStore, изменение или удаление шаблона не меняет старые сообщения. Выполнение правил моделью не гарантируется.
-- Приветствие, история диалогов, создание и удаление чатов с подтверждением.
-- Отправка и потоковые ответы через выбранный провайдер, остановка получения и отображение частичного ответа.
-- Локальная история демочата сохраняется атомарно. Реальные диалоги и сообщения загружаются из аккаунта DeepSeek; отдельного постоянного кеша реальных сообщений на устройстве нет.
+- Список чатов загружается постранично при входе и восстановлении сессии. Поиск фильтрует список по названиям. Сообщения подгружаются при открытии диалога.
+- Отправка и потоковые ответы через выбранный провайдер, серверная остановка через `chat/stop_stream` и сохранение частичного ответа. При раннем Stop клиент ждёт ID ответа до 10 секунд; при неподтверждённой остановке закрывает локальный поток и показывает предупреждение.
+- Редактирование сообщения реального чата через `chat/edit_message`: долгое нажатие на своё сообщение открывает текст и вложения в поле ввода; есть сохранение и отмена. Новый ответ переключает текущую ветку. До отправки изменения исходная история сохраняется; неоднозначный сетевой сбой требует обновления истории без автоматического повтора. Серверные запреты редактирования учитываются.
+- «Продолжить» возобновляет последний незавершённый ответ с тем же ID через `chat/continue`. «Перегенерировать» создаёт новый ответ от выбранного места через `chat/regenerate`; серверные запреты и текущая ветка проверяются перед запросом. Стрелки рядом с сообщением переключают доступные версии после редактирования или перегенерации.
+- При обрыве потока приложение повторно читает историю по полученному ID запроса или ответа. Найденный ответ отображается в чате, для незавершённого ответа доступна кнопка «Продолжить».
+- Вложения выбираются через системное окно Android, загружаются на DeepSeek и отправляются только после успешной обработки. Локальные ограничения клиента: до 10 файлов на сообщение и 50 МиБ на файл; сервер может отклонить неподдерживаемый файл. На обработку после загрузки отведена минута. Приватные временные копии удаляются после завершения операции; исходные документы не меняются.
+- Диалоги и сообщения загружаются из аккаунта DeepSeek; постоянного кеша сообщений на устройстве нет. Деморежим отсутствует; старые локальные данные не читаются и не удаляются.
 - Markdown: заголовки, абзацы, списки, цитаты, жирный и моноширинный текст, блоки кода. Подсветка распространённых ключевых слов Kotlin/Java/Python/JS/TS/JSON, копирование ответа/кода и выделение текста. Это ограниченный renderer, не полный CommonMark; HTML не исполняется, Markdown-ссылки отображаются как текст.
-- Раскрываемые размышления и переключатели DeepThink/Search; в деморежиме они моделируются локально.
-- Системная/светлая/тёмная тема, русский/английский язык, размер текста, переключатель анимаций. Настройки в DataStore.
+- Раскрываемые размышления и переключатели «Рассуждение»/«Поиск».
+- Системная, светлая, тёмно-синяя, тёмная и чёрная темы; русский/английский язык; масштаб текста и элементов 70–150%; переключатель анимаций. Настройки в DataStore.
 - Официальный сайт `https://chat.deepseek.com/` в отдельном WebView: загрузка, ошибки, повтор, навигация назад, открытие браузера, очистка веб-сессии.
 - Gradle Wrapper, unit-тесты, Android Lint, GitHub Actions с Debug APK и условным подписанным Release APK.
 - Оригинальная иконка-снежинка; нет рекламы, аналитики или собственного сервера.
@@ -61,7 +65,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 **Границы безопасности.** Это внутренний веб-протокол DeepSeek, а не публично поддерживаемый OAuth для сторонних клиентов. Метаданные ожидающей попытки и её одноразовое получение не доказывают криптографическую привязку nonce к SnowSeek: поэтому сохранение без проверки пользователем серверного профиля запрещено. Закрытие браузера не означает успех. При отмене, истечении, повторном результате, сетевой ошибке или выходе аккаунт не подключается. Авторизационные URL, nonce и неподтверждённый токен не записываются в настройки/журналы; хранятся только метаданные попытки и подтверждённая зашифрованная сессия.
 
-**Автоматическое подключение встроенного входа.** После успешного входа SnowSeek обнаруживает сессию только собственного WebView на точном origin `https://chat.deepseek.com`, проверяет профиль через `/users/current`, шифрует подтверждённый токен в Android Keystore и открывает реальные чаты. Само изменение URL не считается успехом. Дополнительной кнопки подключения нет. Проверка выполняется только на активном экране; переход, отмена, диалог выхода и очистка сессии блокируют незавершённое сохранение. После ошибки одинаковый токен не проверяется бесконечно: явное обновление/повтор разрешает новую проверку. Сохранённая сессия восстанавливается при следующем запуске и проверяется перед загрузкой чатов. При сетевой ошибке она не стирается; при истечении показывается предложение войти снова. Выход очищает локальные учётные данные и WebView, сохраняя демочаты.
+**Автоматическое подключение встроенного входа.** После успешного входа SnowSeek обнаруживает сессию только собственного WebView на точном origin `https://chat.deepseek.com`, проверяет профиль через `/users/current`, шифрует подтверждённый токен в Android Keystore и открывает реальные чаты. Само изменение URL не считается успехом. Дополнительной кнопки подключения нет. Проверка выполняется только на активном экране; переход, отмена, диалог выхода и очистка сессии блокируют незавершённое сохранение. После ошибки одинаковый токен не проверяется бесконечно: явное обновление/повтор разрешает новую проверку. Сохранённая сессия восстанавливается при следующем запуске и проверяется перед загрузкой чатов. При сетевой ошибке она не стирается; при истечении показывается предложение войти снова. Выход очищает локальные учётные данные и WebView.
 
 ## Сборка локально
 
@@ -93,7 +97,7 @@ app/src/main/java/dev/snowseek/app/
 .github/workflows/android.yml
 ```
 
-`ChatProvider` определяет пользователя, чаты, сообщения, отправку, поток и остановку. `MockChatProvider` работает локально. После проверки и сохранения сессии используется `DeepSeekWebProvider`: профиль, список/создание/удаление чатов, история, отправка, SSE и THINK/RESPONSE. HTTP-транспорт использует платформенный HTTPS-клиент Android с проверкой TLS и запрещёнными редиректами. Ошибки и неоднозначный результат отправки не вызывают автоматическую повторную отправку.
+`ChatProvider` определяет пользователя, чаты, сообщения, отправку, поток и остановку. Без аккаунта доступны только вход и настройки. `MockChatProvider` вынесен в локальные тестовые фикстуры и не включается в APK. После проверки и сохранения сессии используется `DeepSeekWebProvider`: профиль, список/создание/удаление чатов, история, отправка, SSE и THINK/RESPONSE. HTTP-транспорт использует платформенный HTTPS-клиент Android с проверкой TLS и запрещёнными редиректами. Ошибки и неоднозначный результат отправки не вызывают автоматическую повторную отправку.
 
 Интеграция основана на ранее [проверенных HAR и HTTP/SSE-форматах](docs/web-integration-research.md). Отчёт фиксирует состояние исследования до реализации 0.2.0. Внутренние `/api/v0/*` не являются стабильным публичным API и могут измениться. Для каждой генерации запрашивается свежая PoW-задача и исполняется официальный Web Worker в WebView; обходов и собственного PoW-алгоритма нет. При недоступном worker или проверке сервиса показывается ошибка, ответ не подменяется демонстрацией.
 
@@ -107,7 +111,7 @@ WebView используется для официального входа и �
 - Обычная веб-сессия хранится средствами Android WebView. **Выход** удаляет зашифрованный нативный токен, cookies, WebStorage, кеш и HTTP-auth данные приложения, с ожиданием завершения удаления cookies. Это локальный выход, не отзыв всех сессий аккаунта на сервере.
 - Демочаты хранятся в sandbox приложения, без отдельного прикладного шифрования. Они не являются секретным хранилищем: не вводите в демонстрацию пароли и ключи. Защита файлов зависит от защиты устройства и Android; root/разблокированное устройство вне этой модели.
 - Облачный backup и перенос данных исключены манифестом и правилами backup. Удаление приложения удаляет историю. Логи запросов/учётных данных, аналитика и промежуточные серверы отсутствуют.
-- Выход из веб-аккаунта сохраняет локальные демочаты; удалить диалог можно в истории. Данные сайта передаются непосредственно официальному сайту и его ресурсам средствами WebView.
+- Удалить диалог из аккаунта можно в истории. Данные сайта передаются непосредственно официальному сайту и его ресурсам средствами WebView.
 
 ## Release в GitHub Actions
 
@@ -179,12 +183,12 @@ SnowSeek распространяется под [GNU GPLv3](LICENSE). Инфо�
 
 ## English
 
-SnowSeek is an **unofficial, open-source Android 8.0+ app**, not affiliated with DeepSeek. Version 0.2.0 connects the native Compose chat to a user's free DeepSeek web account: conversation list/history, create/delete, messages and SSE reasoning/answers. The offline demo remains available before connecting. Markdown, code highlighting, RU/EN UI, themes and settings are preserved.
+SnowSeek is an **unofficial, open-source Android 8.0+ app**, not affiliated with DeepSeek. Version 0.2.0 connects the native Compose chat to a user's free DeepSeek web account: conversation list/history, create/delete, messages and SSE reasoning/answers. Signed-out mode offers only sign-in and settings; no demo provider is bundled. Markdown, code highlighting, RU/EN UI, themes and settings are preserved.
 
 For native chats, sign in with DeepSeek inside the app, or choose Google on its official form. The unchanged first-party Google authorize URL opens in the default browser. Android 12+ requires user approval for SnowSeek to handle chat.deepseek.com return links. The experimental /authorized nonce exchange is single-use, expires after 10 minutes, excludes previous credentials, verifies the new profile, and requires explicit account confirmation before encrypted persistence. Closing the browser is never considered successful sign-in. No browser cookies are extracted and no OAuth redirect URI is rewritten. This private web protocol is not a publicly supported third-party OAuth API.
 
 Build using JDK 17/21, Android SDK 37.0 and `bash ./gradlew :core:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug` (Windows: `gradlew.bat`). Install `app/build/outputs/apk/debug/app-debug.apk`. GitHub Actions uploads a Debug APK without secrets; signed releases require a pushed `v*` tag and all four signing secrets listed above. No release is published when secrets are incomplete.
 
-The private web integration is experimental and requires phone testing. Up to 100 conversations are loaded; Stop closes local stream reception and does not guarantee stopping server generation. Failed/uncertain sends are never automatically repeated. Website protection and worker changes may require updating the app. No paid Developer API, proxy server, tracking or advertisements. GPLv3; see LICENSE and third-party notices.
+The private web integration is experimental and requires phone testing. Conversation pages load on sign-in and titles are searchable from the drawer. Stop sends `chat/stop_stream` with the assistant message ID before closing local reception. An early stop waits up to 10 seconds for that ID; an unconfirmed stop is reported and the partial reply is preserved. Failed/uncertain sends are never automatically repeated. Website protection and worker changes may require updating the app. No paid Developer API, proxy server, tracking or advertisements. GPLv3; see LICENSE and third-party notices.
 
 Verified locally on 2 November 2026: Debug and unsigned Release builds, all 34 unit tests, APK signature/alignment and workflow syntax. Android Lint reports no errors and two warnings (target SDK 36 and an empty local resource directory). No device/emulator validation or GitHub Actions run was performed; website login/CAPTCHA remains untested.
