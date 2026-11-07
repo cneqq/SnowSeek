@@ -190,6 +190,13 @@ private fun ChatScreen(ui: ChatUiState, settings: AppSettings, model: SnowSeekVi
     val visibleChats = remember(ui.chats, query, w) {
         if (query.isEmpty()) ui.chats else ui.chats.filter { chatTitle(it, w).contains(query, ignoreCase = true) }
     }
+    val today by produceState(java.time.LocalDate.now()) {
+        while (true) {
+            value = java.time.LocalDate.now()
+            kotlinx.coroutines.delay(60_000)
+        }
+    }
+    val groups = remember(visibleChats, today) { groupChats(visibleChats, today, java.time.ZoneId.systemDefault()) }
     var deleteId by rememberSaveable { mutableStateOf<String?>(null) }
     val current = ui.chats.firstOrNull { it.id == ui.selectedId }
     val haze = rememberHazeState()
@@ -198,21 +205,23 @@ private fun ChatScreen(ui: ChatUiState, settings: AppSettings, model: SnowSeekVi
     var showRequests by rememberSaveable(current?.id) { mutableStateOf(false) }
     var jumpToRequest by remember(current?.id) { mutableStateOf<String?>(null) }
     ModalNavigationDrawer(drawerState = drawer, drawerContent = {
-        ModalDrawerSheet(modifier = Modifier.widthIn(max = 320.dp).imePadding(), drawerContainerColor = MaterialTheme.colorScheme.surfaceVariant) {
-            Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                BrandMark(); Text("SnowSeek", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        ModalDrawerSheet(modifier = Modifier.widthIn(max = 320.dp).imePadding(), drawerContainerColor = MaterialTheme.colorScheme.surface) {
+            Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                BrandMark(32); Text("SnowSeek", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             }
             Button(onClick = { keyboard?.hide(); model.newChat(); scope.launch { drawer.close() } },
                 enabled = !ui.loading && !ui.generating && ui.initialized,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), shape = CircleShape) {
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    contentColor = MaterialTheme.colorScheme.onSurface),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), shape = RoundedCornerShape(14.dp)) {
                 Icon(Icons.Outlined.Add, null); Spacer(Modifier.width(8.dp)); Text(w.text("Новый чат", "New chat"))
             }
             OutlinedTextField(
                 value = chatQuery,
                 onValueChange = { chatQuery = it },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-                label = { Text(w.text("Поиск чатов", "Search chats")) },
-                placeholder = { Text(w.text("По названию", "By title")) },
+                placeholder = { Text(w.text("Поиск чатов", "Search chats")) },
+                shape = RoundedCornerShape(18.dp),
                 leadingIcon = { Icon(Icons.Outlined.Search, null) },
                 trailingIcon = if (chatQuery.isEmpty()) null else ({
                     IconButton(onClick = { chatQuery = "" }) {
@@ -224,16 +233,23 @@ private fun ChatScreen(ui: ChatUiState, settings: AppSettings, model: SnowSeekVi
                 keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
             )
             LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 12.dp)) {
-                items(visibleChats, key = { it.id }) { chat ->
-                    NavigationDrawerItem(
-                        label = { Text(chatTitle(chat, w), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                        selected = chat.id == ui.selectedId,
-                        onClick = { keyboard?.hide(); model.select(chat.id); scope.launch { drawer.close() } },
-                        icon = { Icon(Icons.Outlined.ChatBubbleOutline, null, Modifier.size(20.dp)) },
-                        badge = { IconButton(onClick = { deleteId = chat.id }, enabled = !ui.generating && !ui.loading) {
-                            Icon(Icons.Outlined.DeleteOutline, w.text("Удалить чат", "Delete chat"), Modifier.size(19.dp))
-                        } }, modifier = Modifier.padding(vertical = 2.dp),
-                    )
+                ChatAge.entries.forEach { age ->
+                    val chats = groups[age].orEmpty()
+                    if (chats.isNotEmpty()) {
+                        item(key = "section-$age") {
+                            Text(w.ageName(age), Modifier.padding(start = 12.dp, top = 16.dp, bottom = 6.dp),
+                                style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        items(chats, key = { it.id }) { chat ->
+                            ChatHistoryRow(
+                                title = chatTitle(chat, w), selected = chat.id == ui.selectedId, pinned = chat.pinned,
+                                enabled = !ui.generating && !ui.loading && !ui.uploading,
+                                onSelect = { keyboard?.hide(); model.select(chat.id); scope.launch { drawer.close() } },
+                                onPin = { model.pinChat(chat.id, !chat.pinned) },
+                                onDelete = { deleteId = chat.id },
+                            )
+                        }
+                    }
                 }
                 if (visibleChats.isEmpty()) item {
                     when {

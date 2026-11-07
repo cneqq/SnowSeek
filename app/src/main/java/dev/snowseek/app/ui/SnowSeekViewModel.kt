@@ -330,6 +330,18 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun pinChat(id: String, pinned: Boolean) {
+        val current = ui.value
+        if (!current.authenticated || current.signingOut || current.generating || current.loading || current.uploading) return
+        mutableUi.update { it.copy(loading = true) }
+        accountMutation = viewModelScope.launch {
+            try { web.setPinned(id, pinned) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) { report(failure) }
+            finally { mutableUi.update { it.copy(loading = false) } }
+        }
+    }
+
     fun send() {
         val current = ui.value
         val prompt = current.input.trim()

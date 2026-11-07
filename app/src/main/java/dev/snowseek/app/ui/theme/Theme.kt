@@ -48,6 +48,27 @@ private val Black = Charcoal.copy(
     surfaceVariant = Color(0xFF1A1A1A), outlineVariant = Color(0xFF303030),
 )
 
+private fun androidx.compose.material3.ColorScheme.neutralControls(dark: Boolean): androidx.compose.material3.ColorScheme {
+    val ink = if (dark) Color(0xFFE7E7E7) else Color(0xFF242424)
+    val fill = if (dark) Color(0xFF303030) else Color(0xFFE8E8E8)
+    return copy(
+        primary = ink, onPrimary = if (dark) Color(0xFF202020) else Color.White,
+        primaryContainer = fill, onPrimaryContainer = ink,
+        secondary = ink, onSecondary = if (dark) Color(0xFF202020) else Color.White,
+        secondaryContainer = fill, onSecondaryContainer = ink,
+        tertiary = ink, onTertiary = if (dark) Color(0xFF202020) else Color.White,
+        tertiaryContainer = fill, onTertiaryContainer = ink,
+        surfaceTint = Color.Transparent,
+        surfaceDim = if (dark) Color(0xFF101010) else Color(0xFFEEEEEE),
+        surfaceBright = if (dark) Color(0xFF303030) else Color.White,
+        surfaceContainerLowest = if (dark) Color(0xFF080808) else Color.White,
+        surfaceContainerLow = if (dark) Color(0xFF171717) else Color(0xFFF8F8F8),
+        surfaceContainer = if (dark) Color(0xFF202020) else Color(0xFFF2F2F2),
+        surfaceContainerHigh = if (dark) Color(0xFF2A2A2A) else Color(0xFFEAEAEA),
+        surfaceContainerHighest = if (dark) Color(0xFF343434) else Color(0xFFE2E2E2),
+    )
+}
+
 @Composable
 fun SnowSeekTheme(settings: AppSettings, content: @Composable () -> Unit) {
     val dark = when (settings.theme) {
@@ -71,7 +92,7 @@ fun SnowSeekTheme(settings: AppSettings, content: @Composable () -> Unit) {
         ThemeMode.DARK -> Dark
         ThemeMode.CHARCOAL -> Charcoal
         ThemeMode.BLACK -> Black
-    }
+    }.neutralControls(dark)
     val scale = settings.textScale.takeIf { it.isFinite() }?.coerceIn(.7f, 1.5f) ?: 1f
     val typography = remember(settings.font) { snowSeekTypography(settings.font) }
     CompositionLocalProvider(LocalDensity provides Density(density.density * scale, density.fontScale)) {

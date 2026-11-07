@@ -48,6 +48,7 @@ data class ChatSession(
     val updatedAt: Long = System.currentTimeMillis(),
     @kotlinx.serialization.Transient
     val versions: Map<String, MessageVersions> = emptyMap(),
+    val pinned: Boolean = false,
 )
 
 @Serializable

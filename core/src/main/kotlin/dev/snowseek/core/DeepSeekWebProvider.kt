@@ -54,14 +54,15 @@ class DeepSeekWebProvider(
         val previous = state.value.associateBy { it.id }
         val chats = linkedMapOf<String, ChatSession>()
         val cursors = mutableSetOf<String>()
-        var cursor = "&lte_cursor.pinned=false"
+        var cursor = "&lte_cursor.pinned=true"
         while (cursors.add(cursor)) {
             val result = read("/api/v0/chat_session/fetch_page?count=100$cursor")
             val page = result.array("chat_sessions").map { it.jsonObject }
             for (item in page) {
                 val id = item.text("id") ?: throw DeepSeekFailure("DeepSeek: chat id missing")
                 chats.putIfAbsent(id, ChatSession(id, item.text("title") ?: "", previous[id]?.messages.orEmpty(),
-                    timestamp(item, "updated_at"), previous[id]?.versions.orEmpty()))
+                    timestamp(item, "updated_at"), previous[id]?.versions.orEmpty(),
+                    pinned = (item["pinned"] as? JsonPrimitive)?.booleanOrNull == true))
             }
             if ((result["has_more"] as? JsonPrimitive)?.booleanOrNull != true) break
             val last = page.lastOrNull() ?: break
@@ -91,6 +92,14 @@ class DeepSeekWebProvider(
         state.update { listOf(chat) + it.filterNot { old -> old.id == chat.id } }
         parents[chat.id] = null
         return chat
+    }
+
+    suspend fun setPinned(chatId: String, pinned: Boolean) {
+        api().request("/api/v0/chat_session/batch_update_pinned", buildJsonObject {
+            putJsonArray("chat_session_ids") { add(chatId) }
+            put("pinned", pinned)
+        })
+        state.update { chats -> chats.map { if (it.id == chatId) it.copy(pinned = pinned) else it } }
     }
     override suspend fun deleteChat(chatId: String) {
         if (active?.chatId == chatId) throw DeepSeekFailure("Сначала остановите генерацию / Stop generation first")
