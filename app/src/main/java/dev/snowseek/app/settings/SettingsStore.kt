@@ -17,9 +17,11 @@ import kotlinx.coroutines.flow.map
 private val Context.snowSeekSettings by preferencesDataStore(name = "snowseek_settings")
 
 enum class ThemeMode { SYSTEM, LIGHT, DARK, CHARCOAL, BLACK }
+enum class FontMode { SYSTEM, STANDARD, APPLE_LIKE, ANTHROPIC_LIKE }
 
 data class AppSettings(
     val theme: ThemeMode = ThemeMode.SYSTEM,
+    val font: FontMode = FontMode.SYSTEM,
     val language: String = "ru",
     val textScale: Float = 1f,
     val animations: Boolean = true,
@@ -34,6 +36,7 @@ class SettingsStore(context: Context) : AppliedInstructionStore {
     val settings: Flow<AppSettings> = store.data.map { values ->
         AppSettings(
             theme = ThemeMode.entries.firstOrNull { it.name == values[THEME] } ?: ThemeMode.SYSTEM,
+            font = FontMode.entries.firstOrNull { it.name == values[FONT] } ?: FontMode.SYSTEM,
             language = validLanguage(values[LANGUAGE] ?: "ru"),
             textScale = validScale(values[TEXT_SCALE] ?: 1f),
             animations = values[ANIMATIONS] ?: true,
@@ -44,6 +47,7 @@ class SettingsStore(context: Context) : AppliedInstructionStore {
     }
 
     suspend fun updateTheme(value: ThemeMode) { store.edit { it[THEME] = value.name } }
+    suspend fun updateFont(value: FontMode) { store.edit { it[FONT] = value.name } }
     suspend fun updateLanguage(value: String) { store.edit { it[LANGUAGE] = validLanguage(value) } }
     suspend fun updateTextScale(value: Float) { store.edit { it[TEXT_SCALE] = validScale(value) } }
     suspend fun updateAnimations(value: Boolean) { store.edit { it[ANIMATIONS] = value } }
@@ -74,6 +78,7 @@ class SettingsStore(context: Context) : AppliedInstructionStore {
     private companion object {
         val INSTRUCTIONS = stringPreferencesKey("custom_instructions_v1")
         val THEME = stringPreferencesKey("theme")
+        val FONT = stringPreferencesKey("font")
         val LANGUAGE = stringPreferencesKey("language")
         val TEXT_SCALE = floatPreferencesKey("text_scale")
         val ANIMATIONS = booleanPreferencesKey("animations")

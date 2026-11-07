@@ -15,6 +15,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.items
@@ -45,6 +47,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -58,9 +61,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.snowseek.app.BuildConfig
 import dev.snowseek.app.auth.OfficialWebActivity
 import dev.snowseek.app.settings.AppSettings
+import dev.snowseek.app.settings.FontMode
 import dev.snowseek.app.settings.ThemeMode
 import dev.snowseek.app.ui.components.MessageCard
 import dev.snowseek.app.ui.theme.SnowSeekTheme
+import dev.snowseek.app.ui.theme.fontFamily
 import dev.snowseek.core.ChatSession
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
@@ -585,6 +590,8 @@ private fun SettingsScreen(settings: AppSettings, authenticated: Boolean, model:
                     }
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                FontSetting(settings.font, model::font)
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(w.text("Анимации", "Animations"), Modifier.weight(1f)); Switch(checked = settings.animations, onCheckedChange = model::animations)
                 }
@@ -633,7 +640,8 @@ private fun SettingsScreen(settings: AppSettings, authenticated: Boolean, model:
     if (showLicenses) {
         val licenses by produceState<String?>(initialValue = null) {
             value = withContext(Dispatchers.IO) {
-                listOf("THIRD_PARTY_NOTICES.md", "Apache-2.0.txt", "GPL-3.0.txt").joinToString("\n\n") { file ->
+                listOf("THIRD_PARTY_NOTICES.md", "Apache-2.0.txt", "GPL-3.0.txt", "KotlinTeX-MIT.txt",
+                    "NotoSans-OFL.txt", "Inter-OFL.txt", "SourceSerif4-OFL.txt").joinToString("\n\n") { file ->
                     context.assets.open("licenses/$file").bufferedReader().use { it.readText() }
                 }
             }
@@ -647,6 +655,55 @@ private fun SettingsScreen(settings: AppSettings, authenticated: Boolean, model:
                 }
             }, confirmButton = { TextButton(onClick = { showLicenses = false }) { Text(w.text("Закрыть", "Close")) } })
     }
+}
+
+@Composable
+private fun FontSetting(selected: FontMode, onSelect: (FontMode) -> Unit) {
+    val w = LocalWords.current
+    var open by rememberSaveable { mutableStateOf(false) }
+    val title = w.text("Шрифт", "Font")
+    ListItem(
+        headlineContent = { Text(title) },
+        supportingContent = { Text(w.fontName(selected)) },
+        trailingContent = { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null) },
+        modifier = Modifier.clickable(role = Role.Button) { open = true },
+    )
+    if (open) AlertDialog(
+        onDismissRequest = { open = false },
+        title = { Text(title) },
+        text = {
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).selectableGroup()) {
+                FontMode.entries.forEach { mode ->
+                    Row(
+                        Modifier.fillMaxWidth().heightIn(min = 48.dp).selectable(
+                            selected = mode == selected,
+                            role = Role.RadioButton,
+                            onClick = { onSelect(mode); open = false },
+                        ).padding(vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = mode == selected, onClick = null)
+                        Column(Modifier.weight(1f)) {
+                            Text(w.fontName(mode), style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                w.text("Пример текста · 123", "Sample text · 123"),
+                                style = MaterialTheme.typography.bodyLarge.copy(fontFamily = mode.fontFamily()),
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { open = false }) { Text(w.text("Закрыть", "Close")) } },
+    )
+}
+
+private fun Words.fontName(mode: FontMode): String = when (mode) {
+    FontMode.SYSTEM -> text("Системный", "System")
+    FontMode.STANDARD -> text("Обычный", "Standard")
+    FontMode.APPLE_LIKE -> text("В стиле Apple", "Apple-inspired")
+    FontMode.ANTHROPIC_LIKE -> text("В стиле Anthropic", "Anthropic-inspired")
 }
 
 @Composable

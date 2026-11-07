@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
@@ -72,8 +73,9 @@ fun SnowSeekTheme(settings: AppSettings, content: @Composable () -> Unit) {
         ThemeMode.BLACK -> Black
     }
     val scale = settings.textScale.takeIf { it.isFinite() }?.coerceIn(.7f, 1.5f) ?: 1f
+    val typography = remember(settings.font) { snowSeekTypography(settings.font) }
     CompositionLocalProvider(LocalDensity provides Density(density.density * scale, density.fontScale)) {
-        MaterialTheme(colorScheme = colors, shapes = Shapes(
+        MaterialTheme(colorScheme = colors, typography = typography, shapes = Shapes(
             extraSmall = RoundedCornerShape(10.dp), small = RoundedCornerShape(16.dp),
             medium = RoundedCornerShape(24.dp), large = RoundedCornerShape(28.dp),
             extraLarge = RoundedCornerShape(32.dp),
