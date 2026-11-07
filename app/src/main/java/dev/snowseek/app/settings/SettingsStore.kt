@@ -24,7 +24,6 @@ data class GlassSettings(
     val blur: Float = 6f,
     val refraction: Float = .55f,
     val transparency: Float = .35f,
-    val enhanceColors: Boolean = false,
 ) {
     internal fun normalized() = copy(
         blur = blur.finiteIn(0f..24f, 6f),
@@ -66,7 +65,6 @@ class SettingsStore(context: Context) : AppliedInstructionStore {
                 blur = values[GLASS_BLUR] ?: 6f,
                 refraction = values[GLASS_REFRACTION] ?: .55f,
                 transparency = values[GLASS_TRANSPARENCY] ?: .35f,
-                enhanceColors = values[GLASS_COLORS] ?: false,
             ).normalized(),
         )
     }
@@ -83,7 +81,7 @@ class SettingsStore(context: Context) : AppliedInstructionStore {
             it[GLASS_BLUR] = glass.blur
             it[GLASS_REFRACTION] = glass.refraction
             it[GLASS_TRANSPARENCY] = glass.transparency
-            it[GLASS_COLORS] = glass.enhanceColors
+            it.remove(LEGACY_GLASS_COLORS)
         }
     }
     suspend fun completeWelcome() { store.edit { it[WELCOME] = true } }
@@ -122,7 +120,7 @@ class SettingsStore(context: Context) : AppliedInstructionStore {
         val GLASS_BLUR = floatPreferencesKey("composer_glass_blur")
         val GLASS_REFRACTION = floatPreferencesKey("composer_glass_refraction")
         val GLASS_TRANSPARENCY = floatPreferencesKey("composer_glass_transparency")
-        val GLASS_COLORS = booleanPreferencesKey("composer_glass_colors")
+        val LEGACY_GLASS_COLORS = booleanPreferencesKey("composer_glass_colors")
         fun validLanguage(value: String) = if (value == "en") "en" else "ru"
         fun validScale(value: Float) = if (value.isFinite()) value.coerceIn(0.7f, 1.5f) else 1f
     }

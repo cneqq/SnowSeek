@@ -3,13 +3,8 @@ package dev.snowseek.app.ui.components
 import android.os.Build
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -17,11 +12,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.SubcomposeLayout
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -79,7 +71,7 @@ internal fun ComposerSurface(
                     refractionStrength = settings.refraction,
                 )
             }
-            chromaMultiplier(if (settings.enhanceColors) 1.3f else 1f)
+            chromaMultiplier(1f)
         }
     }
     Surface(
@@ -95,76 +87,48 @@ internal fun ComposerSurface(
 }
 
 @Composable
-internal fun GlassSetting(settings: GlassSettings, onApply: (GlassSettings) -> Unit) {
+internal fun GlassEditor(settings: GlassSettings, onBack: () -> Unit, onApply: (GlassSettings) -> Unit) {
     val w = LocalWords.current
-    var open by rememberSaveable { mutableStateOf(false) }
-    ListItem(
-        headlineContent = { Text(w.text("Стекло", "Glass")) },
-        supportingContent = {
-            Text(if (settings.enabled) w.text("Включено для панели ввода", "On for the message composer")
-            else w.text("Выключено", "Off"))
-        },
-        trailingContent = { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null) },
-        modifier = Modifier.clickable(role = Role.Button) { open = true },
-    )
-    if (!open) return
-
     var enabled by rememberSaveable { mutableStateOf(settings.enabled) }
     var blur by rememberSaveable { mutableFloatStateOf(settings.blur) }
     var refraction by rememberSaveable { mutableFloatStateOf(settings.refraction) }
     var transparency by rememberSaveable { mutableFloatStateOf(settings.transparency) }
-    var enhanceColors by rememberSaveable { mutableStateOf(settings.enhanceColors) }
-    val preview = GlassSettings(enabled, blur, refraction, transparency, enhanceColors)
+    val preview = GlassSettings(enabled, blur, refraction, transparency)
     val supportsOptics = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
-    AlertDialog(
-        onDismissRequest = { open = false },
-        title = { Text(w.text("Стекло панели ввода", "Composer glass")) },
-        text = {
-            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(w.text("Включить стекло", "Enable glass"), Modifier.weight(1f))
-                    Switch(checked = enabled, onCheckedChange = { enabled = it })
-                }
-                Text(w.text("Предпросмотр", "Preview"), style = MaterialTheme.typography.labelMedium)
-                GlassPreview(preview)
-                if (enabled) {
-                    if (supportsOptics) {
-                        GlassSlider(w.text("Размытие", "Blur"), "${blur.roundToInt()} dp", blur, 0f..24f) { blur = it }
-                        GlassSlider(w.text("Преломление", "Refraction"), "${(refraction * 100).roundToInt()}%", refraction, 0f..1f) { refraction = it }
-                    } else {
-                        Text(
-                            w.text("Полный эффект стекла доступен с Android 13.", "The full glass effect requires Android 13 or later."),
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                    GlassSlider(w.text("Прозрачность", "Transparency"), "${(transparency * 100).roundToInt()}%", transparency, 0f..0.60f) { transparency = it }
-                    if (supportsOptics) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Text(w.text("Усилить цвета", "Enhance colors"), Modifier.weight(1f))
-                            Switch(checked = enhanceColors, onCheckedChange = { enhanceColors = it })
-                        }
+
+    AppearancePage(
+        title = w.text("Стекло панели ввода", "Composer glass"),
+        onBack = onBack,
+        bottomBar = {
+            Surface {
+                Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 6.dp)) {
+                    Button(onClick = { onApply(preview); onBack() }, modifier = Modifier.align(Alignment.CenterEnd),
+                        enabled = preview != settings) {
+                        Text(w.text("Применить", "Apply"))
                     }
                 }
             }
         },
-        confirmButton = { TextButton(onClick = { onApply(preview); open = false }) { Text(w.text("Применить", "Apply")) } },
-        dismissButton = { TextButton(onClick = { open = false }) { Text(w.text("Отмена", "Cancel")) } },
-    )
-}
-
-@Composable
-private fun GlassSlider(label: String, description: String, value: Float, range: ClosedFloatingPointRange<Float>, onChange: (Float) -> Unit) {
-    Column {
-        Text("$label · $description", style = MaterialTheme.typography.labelLarge)
-        Slider(
-            value = value,
-            onValueChange = onChange,
-            valueRange = range,
-            modifier = Modifier.fillMaxWidth().semantics {
-                contentDescription = label
-                stateDescription = description
-            },
-        )
+    ) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(w.text("Включить стекло", "Enable glass"), Modifier.weight(1f))
+            Switch(checked = enabled, onCheckedChange = { enabled = it })
+        }
+        Text(w.text("Предпросмотр", "Preview"), style = MaterialTheme.typography.labelMedium)
+        GlassPreview(preview)
+        if (enabled) {
+            if (supportsOptics) {
+                AppearanceSlider(w.text("Размытие", "Blur"), "${blur.roundToInt()} dp", blur, 0f..24f, onChange = { blur = it })
+                AppearanceSlider(w.text("Преломление", "Refraction"), "${(refraction * 100).roundToInt()}%", refraction, 0f..1f,
+                    onChange = { refraction = it })
+            } else {
+                Text(w.text("Полный эффект стекла доступен с Android 13.", "The full glass effect requires Android 13 or later."),
+                    style = MaterialTheme.typography.bodySmall)
+            }
+            AppearanceSlider(w.text("Прозрачность", "Transparency"), "${(transparency * 100).roundToInt()}%", transparency, 0f..0.60f,
+                onChange = { transparency = it })
+        }
     }
 }
 
@@ -176,18 +140,22 @@ private fun GlassPreview(settings: GlassSettings) {
     Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))) {
         Column(
             Modifier.fillMaxWidth().then(source).background(MaterialTheme.colorScheme.background).padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(w.text("Пример диалога", "Sample conversation"), style = MaterialTheme.typography.bodyMedium)
+            Text(w.text("Текст над панелью", "Text above the composer"), style = MaterialTheme.typography.bodyMedium)
             Surface(
-                modifier = Modifier.align(Alignment.End).padding(bottom = 8.dp),
-                shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.primaryContainer,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 84.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = lerp(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.surface, .25f),
             ) {
-                Text(w.text("Новое сообщение", "New message"), Modifier.padding(12.dp))
+                Box(Modifier.padding(10.dp), contentAlignment = Alignment.CenterStart) {
+                    Text(w.text("Текст за стеклом · 123\nСравните резкость букв", "Text behind the glass · 123\nCompare the letter edges"),
+                        style = MaterialTheme.typography.bodyLarge)
+                }
             }
-            Spacer(Modifier.height(16.dp))
+            Text(w.text("Текст под панелью", "Text below the composer"), style = MaterialTheme.typography.bodyMedium)
         }
-        Box(Modifier.align(Alignment.BottomCenter).padding(8.dp)) {
+        Box(Modifier.align(Alignment.Center).padding(horizontal = 8.dp)) {
             ComposerSurface(settings, haze) {
                 Text(
                     w.text("Напишите сообщение…", "Write a message…"),

@@ -15,7 +15,6 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -47,7 +46,6 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -68,7 +66,11 @@ import dev.snowseek.app.settings.ThemeMode
 import dev.snowseek.app.ui.components.MessageCard
 import dev.snowseek.app.ui.components.ChatComposerLayout
 import dev.snowseek.app.ui.components.ComposerSurface
-import dev.snowseek.app.ui.components.GlassSetting
+import dev.snowseek.app.ui.components.AppearanceChoice
+import dev.snowseek.app.ui.components.AppearanceLink
+import dev.snowseek.app.ui.components.AppearancePage
+import dev.snowseek.app.ui.components.AppearanceSlider
+import dev.snowseek.app.ui.components.GlassEditor
 import dev.snowseek.app.ui.theme.SnowSeekTheme
 import dev.snowseek.app.ui.theme.fontFamily
 import dev.snowseek.core.ChatSession
@@ -78,6 +80,7 @@ import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 
 @Composable
 fun SnowSeekApp(model: SnowSeekViewModel) {
@@ -85,19 +88,29 @@ fun SnowSeekApp(model: SnowSeekViewModel) {
     val ui by model.ui.collectAsStateWithLifecycle()
     val settingsReady by model.settingsReady.collectAsStateWithLifecycle()
     var showSettings by rememberSaveable { mutableStateOf(false) }
+    var scalePreview by remember { mutableStateOf<Float?>(null) }
+    LaunchedEffect(settings.textScale, ui.error) {
+        if (scalePreview == settings.textScale || ui.error) scalePreview = null
+    }
+    val themedSettings = scalePreview?.let { settings.copy(textScale = it) } ?: settings
     val context = LocalContext.current
     val words = remember(settings.language) { Words(settings.language) }
     val openWeb = {
         context.startActivity(Intent(context, OfficialWebActivity::class.java).putExtra("language", settings.language))
     }
-    SnowSeekTheme(settings) {
+    SnowSeekTheme(themedSettings) {
         CompositionLocalProvider(LocalWords provides words) {
             Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                 if (!settingsReady) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
                 } else if (showSettings) {
                     BackHandler { showSettings = false }
-                    SettingsScreen(settings, ui.authenticated, model, { showSettings = false })
+                    SettingsScreen(
+                        themedSettings, ui.authenticated, model,
+                        onScaleChange = { scalePreview = it },
+                        onScaleFinished = { scalePreview?.let(model::textScale) },
+                        onBack = { showSettings = false },
+                    )
                 } else if (!ui.authenticated && (ui.loading || ui.sessionChanging)) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
                 } else if (!ui.authenticated) {
@@ -582,8 +595,49 @@ private fun Composer(ui: ChatUiState, model: SnowSeekViewModel, glass: GlassSett
 }
 
 @Composable
-private fun SettingsScreen(settings: AppSettings, authenticated: Boolean, model: SnowSeekViewModel, onBack: () -> Unit) {
+private fun SettingsScreen(
+    settings: AppSettings,
+    authenticated: Boolean,
+    model: SnowSeekViewModel,
+    onScaleChange: (Float) -> Unit,
+    onScaleFinished: () -> Unit,
+    onBack: () -> Unit,
+) {
     val w = LocalWords.current
+    var page by rememberSaveable { mutableStateOf(AppearanceSection.OVERVIEW) }
+    val overviewScroll = rememberScrollState()
+    val closePage = { page = AppearanceSection.OVERVIEW }
+    when (page) {
+        AppearanceSection.THEME -> {
+            AppearancePage(w.text("Тема", "Theme"), closePage) {
+                Column(Modifier.selectableGroup()) {
+                    ThemeMode.entries.forEach { mode ->
+                        AppearanceChoice(w.themeName(mode), settings.theme == mode, { model.theme(mode) })
+                    }
+                }
+            }
+            return
+        }
+        AppearanceSection.FONT -> {
+            AppearancePage(w.text("Шрифт", "Font"), closePage) {
+                Column(Modifier.selectableGroup()) {
+                    FontMode.entries.forEach { mode ->
+                        AppearanceChoice(w.fontName(mode), settings.font == mode, { model.font(mode) }) {
+                            Text(w.text("Пример текста · 123", "Sample text · 123"),
+                                style = MaterialTheme.typography.bodyMedium.copy(fontFamily = mode.fontFamily()),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+            return
+        }
+        AppearanceSection.GLASS -> {
+            GlassEditor(settings.glass, closePage, model::glass)
+            return
+        }
+        AppearanceSection.OVERVIEW -> Unit
+    }
     var logoutConfirmation by rememberSaveable { mutableStateOf(false) }
     var showLicenses by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
@@ -594,31 +648,23 @@ private fun SettingsScreen(settings: AppSettings, authenticated: Boolean, model:
         TopAppBar(title = { Text(w.text("Настройки", "Settings")) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, w.text("Назад", "Back")) } },
             colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background))
     }) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).verticalScrollCompat().padding(20.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+        Column(Modifier.fillMaxSize().padding(padding).verticalScroll(overviewScroll).padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)) {
             SettingGroup(w.text("ОФОРМЛЕНИЕ", "APPEARANCE")) {
-                Text(w.text("Тема", "Theme"), style = MaterialTheme.typography.titleSmall)
-                ThemeMode.entries.forEach { theme ->
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        RadioButton(selected = settings.theme == theme, onClick = { model.theme(theme) })
-                        TextButton(onClick = { model.theme(theme) }, modifier = Modifier.weight(1f)) { Text(when(theme) {
-                            ThemeMode.SYSTEM -> w.text("Как в системе", "System default")
-                            ThemeMode.LIGHT -> w.text("Светлая", "Light")
-                            ThemeMode.DARK -> w.text("Тёмно-синяя", "Dark blue")
-                            ThemeMode.CHARCOAL -> w.text("Тёмная", "Dark")
-                            ThemeMode.BLACK -> w.text("Чёрная", "Black")
-                        }, modifier = Modifier.fillMaxWidth()) }
-                    }
+                AppearanceLink(w.text("Тема", "Theme"), w.themeName(settings.theme)) { page = AppearanceSection.THEME }
+                AppearanceLink(w.text("Шрифт", "Font"), w.fontName(settings.font)) { page = AppearanceSection.FONT }
+                val glassStatus = if (settings.glass.enabled) w.text("Включено", "On") else w.text("Выключено", "Off")
+                AppearanceLink(w.text("Стекло панели ввода", "Composer glass"), glassStatus) {
+                    page = AppearanceSection.GLASS
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                FontSetting(settings.font, model::font)
-                GlassSetting(settings.glass, model::glass)
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(w.text("Анимации", "Animations"), Modifier.weight(1f)); Switch(checked = settings.animations, onCheckedChange = model::animations)
                 }
-                Text(w.text("Масштаб интерфейса", "Interface scale") + " · ${(settings.textScale * 100).toInt()}%", style = MaterialTheme.typography.titleSmall)
-                var textSize by remember(settings.textScale) { mutableFloatStateOf(settings.textScale) }
-                Slider(value = textSize, onValueChange = { textSize = it }, onValueChangeFinished = { model.textScale(textSize) }, valueRange = .7f..1.5f, steps = 15)
+                AppearanceSlider(
+                    w.text("Масштаб интерфейса", "Interface scale"), "${(settings.textScale * 100).roundToInt()}%",
+                    settings.textScale, .7f..1.5f, onChange = onScaleChange, steps = 15, onFinished = onScaleFinished,
+                )
             }
             SettingGroup(w.text("ЯЗЫК", "LANGUAGE")) {
                 listOf("ru" to "Русский", "en" to "English").forEach { (code, name) ->
@@ -678,46 +724,14 @@ private fun SettingsScreen(settings: AppSettings, authenticated: Boolean, model:
     }
 }
 
-@Composable
-private fun FontSetting(selected: FontMode, onSelect: (FontMode) -> Unit) {
-    val w = LocalWords.current
-    var open by rememberSaveable { mutableStateOf(false) }
-    val title = w.text("Шрифт", "Font")
-    ListItem(
-        headlineContent = { Text(title) },
-        supportingContent = { Text(w.fontName(selected)) },
-        trailingContent = { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null) },
-        modifier = Modifier.clickable(role = Role.Button) { open = true },
-    )
-    if (open) AlertDialog(
-        onDismissRequest = { open = false },
-        title = { Text(title) },
-        text = {
-            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).selectableGroup()) {
-                FontMode.entries.forEach { mode ->
-                    Row(
-                        Modifier.fillMaxWidth().heightIn(min = 48.dp).selectable(
-                            selected = mode == selected,
-                            role = Role.RadioButton,
-                            onClick = { onSelect(mode); open = false },
-                        ).padding(vertical = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        RadioButton(selected = mode == selected, onClick = null)
-                        Column(Modifier.weight(1f)) {
-                            Text(w.fontName(mode), style = MaterialTheme.typography.titleSmall)
-                            Text(
-                                w.text("Пример текста · 123", "Sample text · 123"),
-                                style = MaterialTheme.typography.bodyLarge.copy(fontFamily = mode.fontFamily()),
-                            )
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = { open = false }) { Text(w.text("Закрыть", "Close")) } },
-    )
+private enum class AppearanceSection { OVERVIEW, THEME, FONT, GLASS }
+
+private fun Words.themeName(mode: ThemeMode): String = when (mode) {
+    ThemeMode.SYSTEM -> text("Как в системе", "System default")
+    ThemeMode.LIGHT -> text("Светлая", "Light")
+    ThemeMode.DARK -> text("Тёмно-синяя", "Dark blue")
+    ThemeMode.CHARCOAL -> text("Тёмная", "Dark")
+    ThemeMode.BLACK -> text("Чёрная", "Black")
 }
 
 private fun Words.fontName(mode: FontMode): String = when (mode) {
@@ -729,10 +743,10 @@ private fun Words.fontName(mode: FontMode): String = when (mode) {
 
 @Composable
 private fun SettingGroup(label: String, content: @Composable ColumnScope.() -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(label, style = MaterialTheme.typography.labelSmall, letterSpacing = 1.6.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Surface(color = MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(22.dp), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
-            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp), content = content)
+        Surface(color = MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
+            Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp), content = content)
         }
     }
 }
