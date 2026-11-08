@@ -767,6 +767,10 @@ private fun SettingsScreen(
             PhotoCacheSettings(settings.photoCacheLimit, model, closePage)
             return
         }
+        AppearanceSection.LOCAL_MODEL -> {
+            LocalModelScreen(closePage)
+            return
+        }
         AppearanceSection.WALLPAPER -> {
             val ui by model.ui.collectAsStateWithLifecycle()
             WallpaperEditor(settings.wallpaper, model, ui.importingWallpaper, closePage)
@@ -823,6 +827,11 @@ private fun SettingsScreen(
                     page = AppearanceSection.CACHE
                 }
             }
+            SettingGroup(w.text("ЛОКАЛЬНЫЙ ИИ", "ON-DEVICE AI")) {
+                AppearanceLink(w.text("Локальная модель", "Local model"), "Qwen3 0.6B · $347 MB") {
+                    page = AppearanceSection.LOCAL_MODEL
+                }
+            }
             SettingGroup(w.text("АККАУНТ", "ACCOUNT")) {
                 if (authenticated) {
                     TextButton(onClick = { logoutConfirmation = true }, shape = CircleShape,
@@ -873,7 +882,7 @@ private fun SettingsScreen(
     }
 }
 
-private enum class AppearanceSection { OVERVIEW, THEME, FONT, GLASS, CACHE, WALLPAPER }
+private enum class AppearanceSection { OVERVIEW, THEME, FONT, GLASS, CACHE, WALLPAPER, LOCAL_MODEL }
 
 @Composable
 private fun PhotoCacheSettings(limit: PhotoCacheLimit, model: SnowSeekViewModel, onBack: () -> Unit) {

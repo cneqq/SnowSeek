@@ -14,8 +14,8 @@ android {
         applicationId = "dev.snowseek.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 19
-        versionName = "0.3.7"
+        versionCode = 20
+        versionName = "0.3.8"
     }
 
     buildFeatures {
@@ -64,4 +64,5 @@ dependencies {
     implementation("androidx.datastore:datastore-preferences:1.3.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.12.0")
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.17.1")
 }
