@@ -52,6 +52,7 @@ internal fun ChatHistoryRow(
     enabled: Boolean,
     onSelect: () -> Unit,
     onPin: () -> Unit,
+    onRename: () -> Unit,
     onDelete: () -> Unit,
 ) {
     val w = LocalWords.current
@@ -75,6 +76,11 @@ internal fun ChatHistoryRow(
                 expanded = actions, onDismissRequest = { actions = false },
                 containerColor = colors.surfaceContainer,
             ) {
+                DropdownMenuItem(
+                    text = { Text(w.text("Переименовать", "Rename")) },
+                    leadingIcon = { Icon(Icons.Outlined.Edit, null) },
+                    onClick = { actions = false; onRename() },
+                )
                 DropdownMenuItem(
                     text = { Text(if (pinned) w.text("Открепить", "Unpin") else w.text("Закрепить", "Pin")) },
                     leadingIcon = { Icon(Icons.Outlined.PushPin, null) },

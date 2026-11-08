@@ -208,6 +208,8 @@ private fun ChatScreen(ui: ChatUiState, settings: AppSettings, model: SnowSeekVi
     }
     val groups = remember(visibleChats, today) { groupChats(visibleChats, today, java.time.ZoneId.systemDefault()) }
     var deleteId by rememberSaveable { mutableStateOf<String?>(null) }
+    var renameId by rememberSaveable { mutableStateOf<String?>(null) }
+    var renameTitle by rememberSaveable { mutableStateOf("") }
     val current = ui.chats.firstOrNull { it.id == ui.selectedId }
     val haze = rememberHazeState()
     val backdrop = haze.takeIf { settings.glass.enabled && !current?.messages.isNullOrEmpty() }
@@ -256,6 +258,7 @@ private fun ChatScreen(ui: ChatUiState, settings: AppSettings, model: SnowSeekVi
                                 enabled = !ui.generating && !ui.loading && !ui.uploading,
                                 onSelect = { keyboard?.hide(); model.select(chat.id); scope.launch { drawer.close() } },
                                 onPin = { model.pinChat(chat.id, !chat.pinned) },
+                                onRename = { renameTitle = chat.title; renameId = chat.id },
                                 onDelete = { deleteId = chat.id },
                             )
                         }
@@ -375,6 +378,42 @@ private fun ChatScreen(ui: ChatUiState, settings: AppSettings, model: SnowSeekVi
             }
         }
     }
+    val renamingChat = ui.chats.firstOrNull { it.id == renameId }
+    if (renamingChat != null) AlertDialog(
+        onDismissRequest = { if (!ui.loading) renameId = null },
+        title = { Text(w.text("Переименовать чат", "Rename chat")) },
+        text = {
+            OutlinedTextField(
+                value = renameTitle,
+                onValueChange = { renameTitle = it.replace('\n', ' ').replace('\r', ' ') },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text(w.text("Название", "Title")) },
+                singleLine = true,
+                enabled = !ui.loading,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = {
+                    if (!ui.loading && renameTitle.isNotBlank() && renameTitle.trim() != renamingChat.title) {
+                        model.renameChat(renamingChat.id, renameTitle) {
+                            if (renameId == renamingChat.id) renameId = null
+                        }
+                    }
+                }),
+            )
+        },
+        confirmButton = {
+            TextButton(
+                enabled = !ui.loading && renameTitle.isNotBlank() && renameTitle.trim() != renamingChat.title,
+                onClick = {
+                    model.renameChat(renamingChat.id, renameTitle) {
+                        if (renameId == renamingChat.id) renameId = null
+                    }
+                },
+            ) { Text(w.text("Сохранить", "Save")) }
+        },
+        dismissButton = {
+            TextButton(onClick = { renameId = null }, enabled = !ui.loading) { Text(w.text("Отмена", "Cancel")) }
+        },
+    )
     if (deleteId != null) AlertDialog(onDismissRequest = { deleteId = null },
         title = { Text(w.text("Удалить диалог?", "Delete this conversation?")) },
         text = { Text(w.text("Диалог будет удалён из аккаунта. Отменить это действие нельзя.", "This conversation will be deleted from your account. This cannot be undone.")) },

@@ -101,6 +101,19 @@ class DeepSeekWebProvider(
         })
         state.update { chats -> chats.map { if (it.id == chatId) it.copy(pinned = pinned) else it } }
     }
+
+    suspend fun renameChat(chatId: String, title: String) {
+        val name = title.trim()
+        require(name.isNotEmpty()) { "Chat title cannot be empty" }
+        if (active?.chatId == chatId) throw DeepSeekFailure("Сначала остановите генерацию / Stop generation first")
+        val result = api().request("/api/v0/chat_session/update_title", buildJsonObject {
+            put("chat_session_id", chatId)
+            put("title", name)
+        }) as? JsonObject
+        val savedTitle = result?.text("title")?.takeIf { it.isNotBlank() } ?: name
+        state.update { chats -> chats.map { if (it.id == chatId) it.copy(title = savedTitle) else it } }
+    }
+
     override suspend fun deleteChat(chatId: String) {
         if (active?.chatId == chatId) throw DeepSeekFailure("Сначала остановите генерацию / Stop generation first")
         api().request("/api/v0/chat_session/delete", buildJsonObject { putJsonArray("chat_session_ids") { add(chatId) } })
