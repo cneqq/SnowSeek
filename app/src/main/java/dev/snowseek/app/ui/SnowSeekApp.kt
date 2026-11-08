@@ -67,10 +67,14 @@ import dev.snowseek.app.settings.AppSettings
 import dev.snowseek.app.settings.FontMode
 import dev.snowseek.app.settings.GlassSettings
 import dev.snowseek.app.settings.PhotoCacheLimit
+import dev.snowseek.app.settings.WallpaperKind
 import dev.snowseek.app.settings.ThemeMode
 import dev.snowseek.app.ui.components.MessageCard
 import dev.snowseek.app.ui.components.PhotoAttachment
 import dev.snowseek.app.ui.components.LocalPhotoCache
+import dev.snowseek.app.ui.components.ChatWallpaper
+import dev.snowseek.app.ui.components.WallpaperEditor
+import dev.snowseek.app.ui.components.wallpaperName
 import dev.snowseek.app.ui.components.ChatComposerLayout
 import dev.snowseek.app.ui.components.ComposerSurface
 import dev.snowseek.app.ui.components.AppearanceChoice
@@ -212,7 +216,7 @@ private fun ChatScreen(ui: ChatUiState, settings: AppSettings, model: SnowSeekVi
     var renameTitle by rememberSaveable { mutableStateOf("") }
     val current = ui.chats.firstOrNull { it.id == ui.selectedId }
     val haze = rememberHazeState()
-    val backdrop = haze.takeIf { settings.glass.enabled && !current?.messages.isNullOrEmpty() }
+    val backdrop = haze.takeIf { settings.glass.enabled }
     val requests = remember(current?.messages) { current?.messages.orEmpty().filter { it.role == dev.snowseek.core.MessageRole.USER } }
     var showRequests by rememberSaveable(current?.id) { mutableStateOf(false) }
     var jumpToRequest by remember(current?.id) { mutableStateOf<String?>(null) }
@@ -321,24 +325,29 @@ private fun ChatScreen(ui: ChatUiState, settings: AppSettings, model: SnowSeekVi
                     overlay = backdrop != null,
                     composer = { Composer(ui, model, settings.glass, backdrop, settings.hideInstructions) },
                 ) { composerInset ->
-                    if (!ui.initialized && !ui.loading) {
-                        Column(Modifier.fillMaxSize().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                            Icon(Icons.Outlined.ErrorOutline, null, tint = MaterialTheme.colorScheme.error)
-                            Text(w.text("Не удалось подключиться. Проверьте соединение и повторите попытку.", "Could not connect. Check your connection and try again."), Modifier.padding(vertical = 16.dp))
-                            Button(onClick = model::initialize) { Text(w.text("Повторить", "Try again")) }
+                    val source = if (backdrop == null) Modifier else Modifier.hazeSource(backdrop)
+                    Box(Modifier.fillMaxSize().then(source)) {
+                        ChatWallpaper(settings.wallpaper, Modifier.matchParentSize())
+                        if (!ui.initialized && !ui.loading) {
+                            Column(Modifier.fillMaxSize().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                                Icon(Icons.Outlined.ErrorOutline, null, tint = MaterialTheme.colorScheme.error)
+                                Text(w.text("Не удалось подключиться. Проверьте соединение и повторите попытку.", "Could not connect. Check your connection and try again."), Modifier.padding(vertical = 16.dp))
+                                Button(onClick = model::initialize) { Text(w.text("Повторить", "Try again")) }
+                            }
+                        } else if (current?.messages.isNullOrEmpty()) {
+                            EmptyChat(current?.id ?: "empty-start", Modifier.fillMaxSize())
+                        } else {
+                            key(current.id) { MessageList(current, settings.animations, Modifier.fillMaxSize(),
+                                hideInstructions = settings.hideInstructions,
+                                wallpaperEnabled = settings.wallpaper.kind != WallpaperKind.NONE,
+                                attachmentPhotos = ui.attachmentPhotos,
+                                composerInset = composerInset,
+                                canAct = ui.authenticated && !ui.generating && !ui.loading && !ui.uploading,
+                                onEdit = model::editMessage, onContinue = model::continueMessage,
+                                onRegenerate = model::regenerateMessage, onVersion = model::switchVersion,
+                                canSwitchVersion = ui.editingMessageId == null,
+                                jumpToRequest = jumpToRequest, onJumpHandled = { jumpToRequest = null }) }
                         }
-                    } else if (current?.messages.isNullOrEmpty()) {
-                        EmptyChat(current?.id ?: "empty-start", Modifier.fillMaxSize())
-                    } else {
-                        key(current.id) { MessageList(current, settings.animations, Modifier.fillMaxSize(),
-                            hideInstructions = settings.hideInstructions,
-                            attachmentPhotos = ui.attachmentPhotos,
-                            composerInset = composerInset, backdrop = backdrop,
-                            canAct = ui.authenticated && !ui.generating && !ui.loading && !ui.uploading,
-                            onEdit = model::editMessage, onContinue = model::continueMessage,
-                            onRegenerate = model::regenerateMessage, onVersion = model::switchVersion,
-                            canSwitchVersion = ui.editingMessageId == null,
-                            jumpToRequest = jumpToRequest, onJumpHandled = { jumpToRequest = null }) }
                     }
                 }
             }
@@ -467,7 +476,7 @@ private fun MessageList(
     onEdit: (String) -> Unit, onContinue: (String) -> Unit, onRegenerate: (String) -> Unit,
     onVersion: (String, String) -> Unit, canSwitchVersion: Boolean,
     jumpToRequest: String?, onJumpHandled: () -> Unit,
-    composerInset: Dp, backdrop: HazeState?, hideInstructions: Boolean, attachmentPhotos: Map<String, Uri>,
+    composerInset: Dp, hideInstructions: Boolean, attachmentPhotos: Map<String, Uri>, wallpaperEnabled: Boolean,
 ) {
     val words = LocalWords.current
     val listState = rememberLazyListState()
@@ -504,8 +513,7 @@ private fun MessageList(
         }
     }
     Box(modifier.fillMaxWidth()) {
-        val source = if (backdrop == null) Modifier else Modifier.hazeSource(backdrop)
-        LazyColumn(state = listState, modifier = Modifier.fillMaxSize().then(source),
+        LazyColumn(state = listState, modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(start = 18.dp, top = 16.dp, end = 18.dp, bottom = 16.dp + composerInset),
             verticalArrangement = Arrangement.spacedBy(22.dp)) {
             items(chat.messages, key = { it.id }) { message ->
@@ -514,6 +522,7 @@ private fun MessageList(
                 AnimatedVisibility(visible = visible, enter = fadeIn(), exit = fadeOut()) {
                     Column {
                         MessageCard(message, onReasoningToggle = { followLatest = false },
+                            wallpaperEnabled = wallpaperEnabled,
                             showInstruction = !hideInstructions,
                             attachmentPhotos = attachmentPhotos,
                             animateStreaming = animations,
@@ -766,6 +775,11 @@ private fun SettingsScreen(
             PhotoCacheSettings(settings.photoCacheLimit, model, closePage)
             return
         }
+        AppearanceSection.WALLPAPER -> {
+            val ui by model.ui.collectAsStateWithLifecycle()
+            WallpaperEditor(settings.wallpaper, model, ui.importingWallpaper, closePage)
+            return
+        }
         AppearanceSection.OVERVIEW -> Unit
     }
     var logoutConfirmation by rememberSaveable { mutableStateOf(false) }
@@ -783,6 +797,9 @@ private fun SettingsScreen(
             SettingGroup(w.text("ОФОРМЛЕНИЕ", "APPEARANCE")) {
                 AppearanceLink(w.text("Тема", "Theme"), w.themeName(settings.theme)) { page = AppearanceSection.THEME }
                 AppearanceLink(w.text("Шрифт", "Font"), w.fontName(settings.font)) { page = AppearanceSection.FONT }
+                AppearanceLink(w.text("Обои чата", "Chat wallpaper"), w.wallpaperName(settings.wallpaper.kind)) {
+                    page = AppearanceSection.WALLPAPER
+                }
                 val glassStatus = if (settings.glass.enabled) w.text("Включено", "On") else w.text("Выключено", "Off")
                 AppearanceLink(w.text("Стекло панели ввода", "Composer glass"), glassStatus) {
                     page = AppearanceSection.GLASS
@@ -864,7 +881,7 @@ private fun SettingsScreen(
     }
 }
 
-private enum class AppearanceSection { OVERVIEW, THEME, FONT, GLASS, CACHE }
+private enum class AppearanceSection { OVERVIEW, THEME, FONT, GLASS, CACHE, WALLPAPER }
 
 @Composable
 private fun PhotoCacheSettings(limit: PhotoCacheLimit, model: SnowSeekViewModel, onBack: () -> Unit) {

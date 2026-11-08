@@ -16,6 +16,9 @@ import dev.snowseek.app.auth.WebSession
 import dev.snowseek.app.auth.DeepSeekCredentials
 import dev.snowseek.app.data.DeepSeekHttpTransport
 import dev.snowseek.app.data.PhotoCache
+import dev.snowseek.app.data.WallpaperStore
+import dev.snowseek.app.settings.WallpaperKind
+import dev.snowseek.app.settings.WallpaperSettings
 import dev.snowseek.app.settings.AppSettings
 import dev.snowseek.app.settings.FontMode
 import dev.snowseek.app.settings.GlassSettings
@@ -52,6 +55,7 @@ data class ChatUiState(
     val attachments: List<ChatAttachment> = emptyList(),
     val attachmentPhotos: Map<String, Uri> = emptyMap(),
     val uploading: Boolean = false,
+    val importingWallpaper: Boolean = false,
     val loading: Boolean = true,
     val generating: Boolean = false,
     val deepThink: Boolean = false,
@@ -67,6 +71,7 @@ data class ChatUiState(
 class SnowSeekViewModel(application: Application) : AndroidViewModel(application) {
     private val preferences = SettingsStore(application)
     private val credentials = DeepSeekCredentials.get(application)
+    private val wallpapers = WallpaperStore(application)
     internal val photoCache = PhotoCache(File(application.cacheDir, "attachment-photos")) { credentials.changes.value }
     private val transport = DeepSeekHttpTransport(application)
     private val web = DeepSeekWebProvider(transport, preferences)
@@ -96,6 +101,7 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
     private var inputBeforeEdit = ""
     private var attachmentsBeforeEdit = emptyList<ChatAttachment>()
     private var upload: Job? = null
+    private var wallpaperImport: Job? = null
     private var activeChatId: String? = null
     private var initialization: Job? = null
     private var providerCollection: Job? = null
@@ -496,6 +502,34 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
     fun textScale(value: Float) = save { preferences.updateTextScale(value) }
     fun animations(value: Boolean) = save { preferences.updateAnimations(value) }
     fun photoCacheLimit(value: PhotoCacheLimit) = save { preferences.updatePhotoCacheLimit(value) }
+    fun wallpaper(value: WallpaperSettings) {
+        if (wallpaperImport?.isActive != true) save { preferences.updateWallpaper(value) }
+    }
+    fun wallpaperPhoto(uri: Uri) {
+        if (wallpaperImport?.isActive == true) return
+        mutableUi.update { it.copy(importingWallpaper = true) }
+        wallpaperImport = viewModelScope.launch {
+            var imported: String? = null
+            var committed = false
+            try {
+                imported = wallpapers.importPhoto(uri)
+                val previous = settings.value.wallpaper
+                withContext(kotlinx.coroutines.NonCancellable) {
+                    preferences.updateWallpaper(previous.copy(kind = WallpaperKind.PHOTO, photoId = imported))
+                    committed = true
+                    previous.photoId?.let { wallpapers.discard(it) }
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) {
+                report(DeepSeekFailure("Не удалось сохранить обои. Выберите другое фото. / Could not save wallpaper; select another photo."))
+            } finally {
+                withContext(kotlinx.coroutines.NonCancellable) {
+                    if (!committed) imported?.let { wallpapers.discard(it) }
+                }
+                mutableUi.update { it.copy(importingWallpaper = false) }
+            }
+        }
+    }
     fun clearPhotoCache() = save { photoCache.clear() }
     fun hideInstructions(value: Boolean) = save {
         preferences.updateHideInstructions(value)

@@ -6,6 +6,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -56,10 +57,13 @@ fun MessageCard(
     onReveal: () -> Unit = {},
     showInstruction: Boolean = true,
     attachmentPhotos: Map<String, Uri> = emptyMap(),
+    wallpaperEnabled: Boolean = false,
 ) {
     val w = LocalWords.current
     val user = message.role == MessageRole.USER
-    Column(Modifier.fillMaxWidth(), horizontalAlignment = if (user) Alignment.End else Alignment.Start) {
+    val background = if (wallpaperEnabled && !user) Modifier.clip(RoundedCornerShape(16.dp))
+        .background(MaterialTheme.colorScheme.surface.copy(alpha = .94f)).padding(12.dp) else Modifier
+    Column(Modifier.fillMaxWidth().then(background), horizontalAlignment = if (user) Alignment.End else Alignment.Start) {
         if (user) {
             if (showInstruction) message.instruction?.let { dev.snowseek.app.ui.AppliedInstruction(it) }
             Surface(shape = RoundedCornerShape(22.dp, 22.dp, 6.dp, 22.dp),

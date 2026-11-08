@@ -1,11 +1,7 @@
 package dev.snowseek.app.ui.components
 
-import android.content.ContentResolver
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.graphics.ImageDecoder
 import android.net.Uri
-import android.os.Build
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -25,16 +21,16 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.snowseek.app.ui.LocalWords
 import dev.snowseek.app.data.PhotoCache
+import dev.snowseek.app.data.decodeAttachment
+import dev.snowseek.app.data.decodeCachedPhoto
+import dev.snowseek.app.data.decodePreview
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
-import java.io.File
 import java.net.HttpURLConnection
 import java.net.URI
-import java.nio.ByteBuffer
 import kotlin.coroutines.coroutineContext
-import kotlin.math.roundToInt
 
 @Composable
 internal fun PhotoAttachment(id: String, uri: Uri?, name: String, modifier: Modifier = Modifier, previewUrl: String? = null) {
@@ -111,13 +107,6 @@ private fun attachmentImage(id: String, uri: Uri?, previewUrl: String?, maxSide:
     return image
 }
 
-private fun decodeCachedPhoto(file: File, maxSide: Int): Bitmap? {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-        return decodeSampled(ImageDecoder.createSource(file), maxSide)
-    }
-    return decodeSampled(maxSide) { BitmapFactory.decodeFile(file.path, it) }
-}
-
 private inline fun decodeOrNull(block: () -> Bitmap?): Bitmap? = try {
     block()
 } catch (_: java.io.IOException) {
@@ -158,45 +147,4 @@ private suspend fun downloadPreview(url: String, variant: String): ByteArray? {
     } finally {
         connection.disconnect()
     }
-}
-
-private fun decodePreview(bytes: ByteArray, maxSide: Int): Bitmap? {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-        return decodeSampled(ImageDecoder.createSource(ByteBuffer.wrap(bytes)), maxSide)
-    }
-    return decodeSampled(maxSide) { BitmapFactory.decodeByteArray(bytes, 0, bytes.size, it) }
-}
-
-private fun decodeAttachment(resolver: ContentResolver, uri: Uri, maxSide: Int): Bitmap? {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-        return decodeSampled(ImageDecoder.createSource(resolver, uri), maxSide)
-    }
-    return decodeSampled(maxSide) { options ->
-        resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
-    }
-}
-
-@androidx.annotation.RequiresApi(Build.VERSION_CODES.P)
-private fun decodeSampled(source: ImageDecoder.Source, maxSide: Int): Bitmap =
-    ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
-        val size = info.size
-        val longest = maxOf(size.width, size.height)
-        if (longest > maxSide) {
-            val ratio = maxSide.toDouble() / longest
-            decoder.setTargetSize(
-                (size.width * ratio).roundToInt().coerceAtLeast(1),
-                (size.height * ratio).roundToInt().coerceAtLeast(1),
-            )
-        }
-    }
-
-private inline fun decodeSampled(maxSide: Int, decode: (BitmapFactory.Options) -> Bitmap?): Bitmap? {
-    val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    decode(options)
-    val longest = maxOf(options.outWidth, options.outHeight)
-    if (longest <= 0) return null
-    options.inJustDecodeBounds = false
-    options.inSampleSize = 1
-    while (longest / options.inSampleSize > maxSide) options.inSampleSize *= 2
-    return decode(options)
 }

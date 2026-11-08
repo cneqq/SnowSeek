@@ -18,6 +18,20 @@ private val Context.snowSeekSettings by preferencesDataStore(name = "snowseek_se
 
 enum class ThemeMode { SYSTEM, LIGHT, DARK, CHARCOAL, BLACK }
 enum class FontMode { SYSTEM, STANDARD, APPLE_LIKE, ANTHROPIC_LIKE }
+enum class WallpaperKind { NONE, SNOW, WAVES, PHOTO }
+
+data class WallpaperSettings(
+    val kind: WallpaperKind = WallpaperKind.NONE,
+    val photoId: String? = null,
+    val dimming: Float = .35f,
+    val blur: Float = 0f,
+) {
+    fun normalized() = copy(
+        photoId = photoId?.takeIf { it.matches(Regex("[a-f0-9-]{36}")) },
+        dimming = if (dimming.isFinite()) dimming.coerceIn(0f, 1f) else .35f,
+        blur = if (blur.isFinite()) blur.coerceIn(0f, 24f) else 0f,
+    )
+}
 enum class PhotoCacheLimit(val bytes: Long) {
     MB_100(100L * 1024 * 1024),
     MB_500(500L * 1024 * 1024),
@@ -55,6 +69,7 @@ data class AppSettings(
     val photoCacheLimit: PhotoCacheLimit = PhotoCacheLimit.MB_500,
     val deepThink: Boolean = false,
     val search: Boolean = false,
+    val wallpaper: WallpaperSettings = WallpaperSettings(),
 )
 
 class SettingsStore(context: Context) : AppliedInstructionStore {
@@ -70,6 +85,12 @@ class SettingsStore(context: Context) : AppliedInstructionStore {
             animations = values[ANIMATIONS] ?: true,
             deepThink = values[DEEP_THINK] ?: false,
             search = values[SEARCH] ?: false,
+            wallpaper = WallpaperSettings(
+                kind = WallpaperKind.entries.firstOrNull { it.name == values[WALLPAPER_KIND] } ?: WallpaperKind.NONE,
+                photoId = values[WALLPAPER_PHOTO],
+                dimming = values[WALLPAPER_DIMMING] ?: .35f,
+                blur = values[WALLPAPER_BLUR] ?: 0f,
+            ).normalized(),
             hideInstructions = values[HIDE_INSTRUCTIONS] ?: false,
             photoCacheLimit = PhotoCacheLimit.entries.firstOrNull { it.name == values[PHOTO_CACHE_LIMIT] }
                 ?: PhotoCacheLimit.MB_500,
@@ -92,6 +113,15 @@ class SettingsStore(context: Context) : AppliedInstructionStore {
     suspend fun updateAnimations(value: Boolean) { store.edit { it[ANIMATIONS] = value } }
     suspend fun toggleDeepThink() { store.edit { it[DEEP_THINK] = !(it[DEEP_THINK] ?: false) } }
     suspend fun toggleSearch() { store.edit { it[SEARCH] = !(it[SEARCH] ?: false) } }
+    suspend fun updateWallpaper(value: WallpaperSettings) {
+        val wallpaper = value.normalized()
+        store.edit {
+            it[WALLPAPER_KIND] = wallpaper.kind.name
+            if (wallpaper.photoId == null) it.remove(WALLPAPER_PHOTO) else it[WALLPAPER_PHOTO] = wallpaper.photoId
+            it[WALLPAPER_DIMMING] = wallpaper.dimming
+            it[WALLPAPER_BLUR] = wallpaper.blur
+        }
+    }
     suspend fun updateHideInstructions(value: Boolean) { store.edit { it[HIDE_INSTRUCTIONS] = value } }
     suspend fun updatePhotoCacheLimit(value: PhotoCacheLimit) { store.edit { it[PHOTO_CACHE_LIMIT] = value.name } }
     suspend fun updateGlass(value: GlassSettings) {
@@ -137,6 +167,10 @@ class SettingsStore(context: Context) : AppliedInstructionStore {
         val ANIMATIONS = booleanPreferencesKey("animations")
         val DEEP_THINK = booleanPreferencesKey("deep_think")
         val SEARCH = booleanPreferencesKey("search")
+        val WALLPAPER_KIND = stringPreferencesKey("wallpaper_kind")
+        val WALLPAPER_PHOTO = stringPreferencesKey("wallpaper_photo")
+        val WALLPAPER_DIMMING = floatPreferencesKey("wallpaper_dimming")
+        val WALLPAPER_BLUR = floatPreferencesKey("wallpaper_blur")
         val HIDE_INSTRUCTIONS = booleanPreferencesKey("hide_instructions")
         val PHOTO_CACHE_LIMIT = stringPreferencesKey("photo_cache_limit")
         val WELCOME = booleanPreferencesKey("welcome_complete")
