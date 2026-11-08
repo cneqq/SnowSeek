@@ -828,7 +828,7 @@ private fun SettingsScreen(
                 }
             }
             SettingGroup(w.text("ЛОКАЛЬНЫЙ ИИ", "ON-DEVICE AI")) {
-                AppearanceLink(w.text("Локальная модель", "Local model"), "Qwen3 0.6B · $347 MB") {
+                AppearanceLink(w.text("Локальные модели", "Local models"), "LiteRT-LM · GGUF") {
                     page = AppearanceSection.LOCAL_MODEL
                 }
             }

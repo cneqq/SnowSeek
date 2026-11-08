@@ -6,6 +6,7 @@ plugins {
 
 android {
     namespace = "dev.snowseek.app"
+    ndkVersion = "29.0.14206865"
     compileSdk {
         version = release(37) { minorApiLevel = 0 }
     }
@@ -14,8 +15,8 @@ android {
         applicationId = "dev.snowseek.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 22
-        versionName = "0.4.0"
+        versionCode = 23
+        versionName = "0.5.0"
         ndk {
             abiFilters += "arm64-v8a"
         }
@@ -35,6 +36,13 @@ android {
         release {
             isMinifyEnabled = false
             isShrinkResources = false
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.31.6"
         }
     }
 

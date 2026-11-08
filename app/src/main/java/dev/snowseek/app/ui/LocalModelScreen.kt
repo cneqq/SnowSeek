@@ -3,10 +3,14 @@
 package dev.snowseek.app.ui
 
 import android.text.format.Formatter
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
@@ -20,10 +24,16 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Send
+import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Download
-import androidx.compose.material3.Button
+import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.StopCircle
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -36,17 +46,21 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.snowseek.app.local.DeviceModelFitEvaluator
+import dev.snowseek.app.local.InstalledModel
+import dev.snowseek.app.local.ModelCatalogEntry
 
 @Composable
 internal fun LocalModelScreen(onBack: () -> Unit) {
@@ -54,101 +68,239 @@ internal fun LocalModelScreen(onBack: () -> Unit) {
     val state by model.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val w = LocalWords.current
-    val bytes = Formatter.formatFileSize(context, 347_251_840L)
-    var deleteConfirmation by rememberSaveable { mutableStateOf(false) }
-    DisposableEffect(model) { onDispose { model.unload() } }
+    var deleteModelId by rememberSaveable { mutableStateOf<String?>(null) }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let(model::import)
+    }
+    BackHandler(enabled = state.chatModelId != null) { model.backToLibrary() }
+    DisposableEffect(model) { onDispose { model.onScreenDisposed() } }
 
-    Scaffold(topBar = { TopAppBar(title = { Text(w.text("Локальная модель", "Local model")) }, navigationIcon = {
-        IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, w.text("Назад", "Back")) }
-    }) }) { padding ->
-        if (state.ready) {
-            Column(Modifier.fillMaxSize().padding(padding).imePadding()) {
-                LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    item {
-                        Text(w.text("Пробный чат · Qwen3 0.6B", "Test chat · Qwen3 0.6B"), style = MaterialTheme.typography.titleMedium)
-                        Text(w.text("Ответы создаются на телефоне. Интернет для них не нужен.", "Replies are generated on your phone. No internet connection is needed."),
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(w.text("Модель может ошибаться. Поиск в интернете отключён.", "The model may make mistakes. Web search is unavailable."),
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        TextButton(onClick = { deleteConfirmation = true }) {
-                            Text(w.text("Удалить модель · $bytes", "Delete model · $bytes"), color = MaterialTheme.colorScheme.error)
-                        }
-                    }
-                    items(state.exchanges) { exchange ->
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.secondaryContainer,
-                                modifier = Modifier.align(Alignment.End)) {
-                                Text(exchange.question, Modifier.padding(horizontal = 14.dp, vertical = 10.dp))
-                            }
-                            Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                modifier = Modifier.fillMaxWidth()) {
-                                Text(exchange.answer.ifBlank { if (state.generating) w.text("Думает…", "Thinking…") else "" },
-                                    Modifier.fillMaxWidth().padding(14.dp))
-                            }
-                        }
-                    }
-                    if (state.loading) item { Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                        Text(w.text("Загрузка модели в память…", "Loading model into memory…"))
-                    } }
-                    state.error?.let { error -> item { Text(error, color = MaterialTheme.colorScheme.error) } }
+    Scaffold(topBar = {
+        TopAppBar(
+            title = { Text(if (state.chatModelId != null) state.installed.firstOrNull { it.id == state.chatModelId }?.displayName
+                ?: w.text("Локальный чат", "Local chat") else w.text("Локальные модели", "Local models")) },
+            navigationIcon = {
+                IconButton(onClick = { if (state.chatModelId != null) model.backToLibrary() else onBack() }) {
+                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, w.text("Назад", "Back"))
                 }
-                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = state.prompt,
-                        onValueChange = model::prompt,
-                        modifier = Modifier.weight(1f),
-                        placeholder = { Text(w.text("Напишите вопрос…", "Ask a question…")) },
-                        maxLines = 4,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                        keyboardActions = KeyboardActions(onSend = { model.send() }),
-                        shape = RoundedCornerShape(24.dp),
-                    )
-                    IconButton(onClick = model::send, enabled = !state.generating && !state.loading && state.prompt.isNotBlank()) {
-                        Icon(Icons.AutoMirrored.Outlined.Send, w.text("Отправить", "Send"))
-                    }
-                }
-            }
+            },
+        )
+    }) { padding ->
+        if (state.chatModelId != null) {
+            LocalModelChat(state.prompt, state.exchanges, state.loading, state.generating, state.error,
+                model::prompt, model::send, model::cancelGeneration, Modifier.fillMaxSize().padding(padding).imePadding())
         } else {
-            Column(Modifier.fillMaxSize().padding(padding).padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Text("Qwen3 0.6B · INT4", style = MaterialTheme.typography.titleLarge)
-                Text(w.text("Компактная языковая модель для ответов без отправки сообщений в интернет.",
-                    "A compact language model that answers without sending messages to the internet."))
-                Text(w.text("Размер загрузки · $bytes", "Download size · $bytes"))
-                Text(w.text("Модель Apache-2.0. SnowSeek сохранит её в памяти приложения и проверит файл после загрузки.",
-                    "Model license: Apache-2.0. SnowSeek stores it in app storage and verifies the file after download."),
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (state.downloading || state.verifying) {
-                    if (state.downloading) {
-                        val progress = (state.downloadedBytes.toFloat() / 347_251_840f).coerceIn(0f, 1f)
-                        LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
-                        Text("${(progress * 100).toInt()}% · ${Formatter.formatFileSize(context, state.downloadedBytes)} / $bytes")
-                    } else {
-                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                        Text(w.text("Проверяем файл модели…", "Verifying model file…"))
-                    }
-                    TextButton(onClick = model::cancelDownload) { Text(w.text("Отменить", "Cancel")) }
-                } else {
-                    Button(onClick = model::download, modifier = Modifier.fillMaxWidth()) {
-                        Icon(Icons.Outlined.Download, null)
-                        Text("  ${if (state.downloadedBytes > 0) w.text("Продолжить загрузку", "Resume download") else w.text("Скачать модель · $bytes", "Download model · $bytes")}")
-                    }
-                    if (state.downloadedBytes > 0) Text(w.text("Уже загружено · ${Formatter.formatFileSize(context, state.downloadedBytes)}",
-                        "Already downloaded · ${Formatter.formatFileSize(context, state.downloadedBytes)}"))
+            LazyColumn(
+                Modifier.fillMaxSize().padding(padding),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                item {
+                    Text(w.text("Ответы создаются на телефоне. Интернет нужен только для скачивания моделей.",
+                        "Replies are generated on your phone. Internet is only needed to download models."),
+                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                item { Text(w.text("Установлены", "Installed"), style = MaterialTheme.typography.titleMedium) }
+                if (state.installed.isEmpty()) item {
+                    Text(w.text("Пока нет установленных моделей. Скачайте модель из каталога или выберите свой файл.",
+                        "No installed models yet. Download one from the catalogue or import a file."),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                items(state.installed, key = { it.id }) { installed ->
+                    InstalledModelCard(installed, selected = installed.id == state.selectedId,
+                        onOpen = { model.openChat(installed.id) }, onDelete = { deleteModelId = installed.id })
+                }
+                item { Text(w.text("Каталог", "Catalogue"), style = MaterialTheme.typography.titleMedium) }
+                items(state.catalog, key = { it.id }) { entry ->
+                    val isInstalled = state.installed.any { it.id == entry.id }
+                    CatalogueModelCard(entry, isInstalled, state.selectedId == entry.id,
+                        state.downloadingId == entry.id, state.verifying && state.downloadingId == entry.id,
+                        state.downloadedBytes, context, onDownload = { model.download(entry) }, onOpen = { model.openChat(entry.id) },
+                        onCancel = model::cancelTransfer)
+                }
+                item {
+                    Button(onClick = { picker.launch(arrayOf("application/octet-stream", "*/*")) },
+                        enabled = state.downloadingId == null, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Outlined.FolderOpen, null)
+                        Text("  ${w.text("Импортировать .gguf или .litertlm", "Import .gguf or .litertlm")}")
+                    }
+                    Text(w.text("Файл будет скопирован в закрытое хранилище SnowSeek. Совместимость зависит от шаблона и возможностей модели.",
+                        "The file is copied to SnowSeek's private storage. Compatibility depends on its template and capabilities."),
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 5.dp))
+                }
+                if (state.downloadingId == "import") item {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Text(if (state.verifying) w.text("Проверка файла и совместимости…", "Checking file and compatibility…")
+                            else "${w.text("Импорт файла", "Importing file")} · ${Formatter.formatFileSize(context, state.downloadedBytes)}")
+                        TextButton(onClick = model::cancelTransfer) { Text(w.text("Отмена", "Cancel")) }
+                    }
+                }
+                state.error?.let { message -> item { Text(message, color = MaterialTheme.colorScheme.error) } }
             }
         }
     }
-    if (deleteConfirmation) AlertDialog(
-        onDismissRequest = { deleteConfirmation = false },
+
+    val deleting = state.installed.firstOrNull { it.id == deleteModelId }
+    if (deleting != null) AlertDialog(
+        onDismissRequest = { deleteModelId = null },
         title = { Text(w.text("Удалить модель?", "Delete model?")) },
-        text = { Text(w.text("Файл Qwen3 размером около $bytes будет удалён с устройства.", "The Qwen3 file, about $bytes, will be removed from this device.")) },
-        confirmButton = { TextButton(onClick = { deleteConfirmation = false; model.deleteModel() }) {
+        text = { Text("${deleting.displayName} · ${Formatter.formatFileSize(context, deleting.fileSizeBytes)}") },
+        confirmButton = { TextButton(onClick = { deleteModelId = null; model.delete(deleting.id) }) {
             Text(w.text("Удалить", "Delete"), color = MaterialTheme.colorScheme.error)
         } },
-        dismissButton = { TextButton(onClick = { deleteConfirmation = false }) { Text(w.text("Отмена", "Cancel")) } },
+        dismissButton = { TextButton(onClick = { deleteModelId = null }) { Text(w.text("Отмена", "Cancel")) } },
     )
+}
+
+@Composable
+private fun InstalledModelCard(model: InstalledModel, selected: Boolean, onOpen: () -> Unit, onDelete: () -> Unit) {
+    val context = LocalContext.current
+    val w = LocalWords.current
+    Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(model.displayName, style = MaterialTheme.typography.titleMedium)
+                    Text("${model.format.extension.uppercase()} · ${Formatter.formatFileSize(context, model.fileSizeBytes)}",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("${model.source} · ${model.validation}", style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                IconButton(onClick = onDelete) { Icon(Icons.Outlined.DeleteOutline, w.text("Удалить", "Delete")) }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(if (selected) w.text("Выбрана", "Selected") else model.memoryEstimate ?: w.text("Оценка примерная", "Rough estimate"),
+                    Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Button(onClick = onOpen) { Text(if (selected) w.text("Открыть чат", "Open chat") else w.text("Выбрать", "Select")) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CatalogueModelCard(
+    entry: ModelCatalogEntry,
+    installed: Boolean,
+    selected: Boolean,
+    downloading: Boolean,
+    verifying: Boolean,
+    downloadedBytes: Long,
+    context: android.content.Context,
+    onDownload: () -> Unit,
+    onOpen: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    val w = LocalWords.current
+    val uriHandler = LocalUriHandler.current
+    val bytes = Formatter.formatFileSize(context, entry.sizeBytes)
+    val fit = DeviceModelFitEvaluator.evaluate(context, entry)
+    Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(entry.name, style = MaterialTheme.typography.titleMedium)
+                    Text("${entry.format.extension.uppercase()} · $bytes", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Text("${entry.license}", style = MaterialTheme.typography.labelMedium)
+            }
+            Text("${w.text("Нагрузка", "Workload")}: ${fit.title} · ${fit.explanation}", style = MaterialTheme.typography.bodySmall)
+            Text("${w.text(entry.tasks, "Short answers, simple questions, drafts")} · ${w.text(entry.languages, "Multilingual")}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("${entry.publisher} · ${entry.baseModel} · ${w.text("Ревизия", "Revision")} ${entry.revision.take(8)}",
+                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                TextButton(onClick = { uriHandler.openUri(entry.downloadUrl.substringBefore("/resolve/")) },
+                    contentPadding = PaddingValues(horizontal = 0.dp, vertical = 0.dp)) {
+                    Text(w.text("Источник", "Source"), style = MaterialTheme.typography.labelMedium)
+                }
+                TextButton(onClick = { uriHandler.openUri(entry.licenseUrl) },
+                    contentPadding = PaddingValues(horizontal = 0.dp, vertical = 0.dp)) {
+                    Text(w.text("Лицензия", "License"), style = MaterialTheme.typography.labelMedium)
+                }
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            when {
+                installed -> Button(onClick = onOpen, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (selected) w.text("Открыть чат", "Open chat") else w.text("Выбрать модель", "Select model"))
+                }
+                verifying -> Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    Text("  ${w.text("Проверяем файл модели…", "Verifying model…")}", Modifier.weight(1f))
+                    TextButton(onClick = onCancel) { Text(w.text("Отменить", "Cancel")) }
+                }
+                downloading -> {
+                    val progress = (downloadedBytes.toFloat() / entry.sizeBytes).coerceIn(0f, 1f)
+                    LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("${(progress * 100).toInt()}% · ${Formatter.formatFileSize(context, downloadedBytes)} / $bytes",
+                            Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                        TextButton(onClick = onCancel) { Text(w.text("Отменить", "Cancel")) }
+                    }
+                }
+                else -> Button(onClick = onDownload, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Outlined.Download, null)
+                    Text("  ${w.text("Скачать", "Download")} · $bytes")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LocalModelChat(
+    prompt: String,
+    exchanges: List<LocalModelExchange>,
+    loading: Boolean,
+    generating: Boolean,
+    error: String?,
+    onPrompt: (String) -> Unit,
+    onSend: () -> Unit,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val w = LocalWords.current
+    Column(modifier) {
+        LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            item {
+                Text(w.text("Ответы создаются на устройстве. Поиск в интернете отключён.",
+                    "Replies are generated on-device. Web search is off."), style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            items(exchanges) { exchange ->
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.secondaryContainer,
+                        modifier = Modifier.align(Alignment.End)) { Text(exchange.question, Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) }
+                    Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        modifier = Modifier.fillMaxWidth()) {
+                        Text(exchange.answer.ifBlank { if (generating) w.text("Создаёт ответ…", "Generating…") else "" },
+                            Modifier.fillMaxWidth().padding(14.dp))
+                    }
+                }
+            }
+            if (loading) item { Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                Text(w.text("Загрузка модели в память…", "Loading model into memory…"))
+            } }
+            error?.let { item { Text(it, color = MaterialTheme.colorScheme.error) } }
+            item { Spacer(Modifier.size(1.dp)) }
+        }
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(value = prompt, onValueChange = onPrompt, modifier = Modifier.weight(1f),
+                placeholder = { Text(w.text("Напишите вопрос…", "Ask a question…")) }, maxLines = 4,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = { if (generating) onCancel() else onSend() }),
+                shape = RoundedCornerShape(24.dp))
+            IconButton(onClick = { if (generating) onCancel() else onSend() }, enabled = generating || (!loading && prompt.isNotBlank())) {
+                Icon(if (generating) Icons.Outlined.StopCircle else Icons.AutoMirrored.Outlined.Send,
+                    if (generating) w.text("Остановить ответ", "Stop response") else w.text("Отправить", "Send"))
+            }
+        }
+    }
 }

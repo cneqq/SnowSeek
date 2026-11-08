@@ -1,0 +1,61 @@
+package dev.snowseek.app.local
+
+internal data class ModelCatalogEntry(
+    val id: String,
+    val name: String,
+    val format: LocalModelFormat,
+    val sizeBytes: Long,
+    val fileName: String,
+    val downloadUrl: String,
+    val revision: String,
+    val sha256: String,
+    val publisher: String,
+    val baseModel: String,
+    val license: String,
+    val licenseUrl: String,
+    val tasks: String,
+    val languages: String,
+    val minimumMemoryBytes: Long,
+    val memoryEstimate: String,
+)
+
+internal object ModelCatalog {
+    val entries = listOf(
+        ModelCatalogEntry(
+            id = "qwen3-06b-litert-int4",
+            name = "Qwen3 0.6B · INT4",
+            format = LocalModelFormat.LITERTLM,
+            sizeBytes = 347_251_840L,
+            fileName = "qwen3_0.6b_nothink_q4_block32_ekv1280.litertlm",
+            downloadUrl = "https://huggingface.co/litert-community/Qwen3-0.6B-int4/resolve/6aa2daf8aba4aa456797fb8040b36a3948bcfda7/qwen3_0.6b_nothink_q4_block32_ekv1280.litertlm?download=true",
+            revision = "6aa2daf8aba4aa456797fb8040b36a3948bcfda7",
+            sha256 = "2df6821ec12702dafd33915e7a1a1adc7c4b053f3672fd9555dfaf3a114c4139",
+            publisher = "LiteRT Community",
+            baseModel = "Qwen3 0.6B",
+            license = "Apache-2.0",
+            licenseUrl = "https://www.apache.org/licenses/LICENSE-2.0",
+            tasks = "Короткие ответы, простые вопросы, черновики",
+            languages = "Многоязычная",
+            minimumMemoryBytes = 1_500_000_000L,
+            memoryEstimate = "примерно 1,5 ГБ и больше",
+        ),
+        ModelCatalogEntry(
+            id = "qwen3-06b-gguf-q4-0",
+            name = "Qwen3 0.6B · GGUF Q4_0",
+            format = LocalModelFormat.GGUF,
+            sizeBytes = 428_970_080L,
+            fileName = "Qwen3-0.6B-Q4_0.gguf",
+            downloadUrl = "https://huggingface.co/ggml-org/Qwen3-0.6B-GGUF/resolve/13ac06624948e4d8589cb4b6f90100837342fcb8/Qwen3-0.6B-Q4_0.gguf?download=true",
+            revision = "13ac06624948e4d8589cb4b6f90100837342fcb8",
+            sha256 = "da2572f16c06133561ce56accaa822216f2391ef4d37fba427801cd6736417d4",
+            publisher = "ggml-org",
+            baseModel = "Qwen3 0.6B · Alibaba",
+            license = "Apache-2.0",
+            licenseUrl = "https://www.apache.org/licenses/LICENSE-2.0",
+            tasks = "Короткие ответы, простые вопросы, черновики",
+            languages = "Многоязычная",
+            minimumMemoryBytes = 1_500_000_000L,
+            memoryEstimate = "примерно 1,5 ГБ и больше",
+        ),
+    ).associateBy(ModelCatalogEntry::id)
+}
