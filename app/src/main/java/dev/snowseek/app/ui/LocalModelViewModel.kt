@@ -12,7 +12,10 @@ import dev.snowseek.app.local.LocalInferenceEngine
 import dev.snowseek.app.local.LocalModelFormat
 import dev.snowseek.app.local.LocalModelRepository
 import dev.snowseek.app.local.ModelCatalogEntry
+import dev.snowseek.app.local.SavedLocalChat
+import dev.snowseek.app.local.SavedLocalTurn
 import java.io.File
+import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -27,7 +30,10 @@ internal data class LocalModelUiState(
     val catalog: List<ModelCatalogEntry> = emptyList(),
     val installed: List<InstalledModel> = emptyList(),
     val selectedId: String? = null,
+    val history: List<SavedLocalChat> = emptyList(),
     val chatModelId: String? = null,
+    val activeChatId: String? = null,
+    val chatTitle: String = "Локальный чат",
     val downloadedBytes: Long = 0,
     val downloadingId: String? = null,
     val verifying: Boolean = false,
@@ -45,6 +51,7 @@ internal class LocalModelViewModel(application: Application) : AndroidViewModel(
             catalog = repository.catalog(),
             installed = repository.installed(),
             selectedId = repository.selectedId(),
+            history = repository.chats(),
         ),
     )
     val state = mutableState.asStateFlow()
@@ -103,13 +110,38 @@ internal class LocalModelViewModel(application: Application) : AndroidViewModel(
         val model = repository.installed().firstOrNull { it.id == modelId } ?: return
         unload()
         repository.select(model.id)
+        val chat = SavedLocalChat(UUID.randomUUID().toString(), model.id, model.displayName,
+            "Новый чат", System.currentTimeMillis(), emptyList())
+        repository.saveChat(chat)
         mutableState.update { it.copy(installed = repository.installed(), selectedId = model.id,
-            chatModelId = model.id, exchanges = emptyList(), prompt = "", error = null) }
+            history = repository.chats(), chatModelId = model.id, activeChatId = chat.id,
+            chatTitle = chat.title, exchanges = emptyList(), prompt = "", error = null) }
+    }
+
+    fun openSavedChat(chatId: String) {
+        val chat = repository.chats().firstOrNull { it.id == chatId } ?: return
+        if (repository.installed().none { it.id == chat.modelId }) {
+            mutableState.update { it.copy(error = "Для этого чата сначала импортируйте или установите модель ${chat.modelName}") }
+            return
+        }
+        unload()
+        repository.select(chat.modelId)
+        mutableState.update { it.copy(installed = repository.installed(), selectedId = chat.modelId,
+            history = repository.chats(), chatModelId = chat.modelId, activeChatId = chat.id,
+            chatTitle = chat.title, exchanges = chat.turns.map { LocalModelExchange(it.question, it.answer) },
+            prompt = "", error = null) }
+    }
+
+    fun deleteSavedChat(chatId: String) {
+        repository.deleteChat(chatId)
+        mutableState.update { it.copy(history = repository.chats()) }
     }
 
     fun backToLibrary() {
+        saveCurrentChat()
         unload()
-        mutableState.update { it.copy(chatModelId = null, prompt = "", exchanges = emptyList(), error = null) }
+        mutableState.update { it.copy(chatModelId = null, activeChatId = null, chatTitle = "Локальный чат",
+            prompt = "", exchanges = emptyList(), history = repository.chats(), error = null) }
     }
 
     fun onScreenDisposed() = backToLibrary()
@@ -131,6 +163,10 @@ internal class LocalModelViewModel(application: Application) : AndroidViewModel(
         if (model == null || question.isEmpty() || current.generating || current.loading) return
         mutableState.update { it.copy(prompt = "", generating = true, error = null,
             exchanges = (it.exchanges + LocalModelExchange(question, "")).takeLast(20)) }
+        mutableState.update { value ->
+            value.copy(chatTitle = if (value.exchanges.size == 1 && value.chatTitle == "Новый чат") question.take(48) else value.chatTitle)
+        }
+        saveCurrentChat()
         inferenceJob = viewModelScope.launch(Dispatchers.IO) {
             try {
                 val active = engineFor(model)
@@ -141,12 +177,16 @@ internal class LocalModelViewModel(application: Application) : AndroidViewModel(
                         if (exchange.answer.isNotBlank()) add(LocalChatMessage("assistant", exchange.answer))
                     }
                 }
+                var lastSavedAt = System.currentTimeMillis()
                 active.stream(messages).collect { piece ->
                     mutableState.update { value ->
                         val last = value.exchanges.lastOrNull() ?: return@update value
                         value.copy(exchanges = value.exchanges.dropLast(1) + last.copy(answer = last.answer + piece))
                     }
+                    val now = System.currentTimeMillis()
+                    if (now - lastSavedAt >= 1_000L) { saveCurrentChat(); lastSavedAt = now }
                 }
+                saveCurrentChat()
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Exception) {
@@ -188,7 +228,16 @@ internal class LocalModelViewModel(application: Application) : AndroidViewModel(
     }
 
     private fun refreshLibrary() {
-        mutableState.update { it.copy(installed = repository.installed(), selectedId = repository.selectedId()) }
+        mutableState.update { it.copy(installed = repository.installed(), selectedId = repository.selectedId(), history = repository.chats()) }
+    }
+
+    private fun saveCurrentChat() {
+        val current = state.value
+        val id = current.activeChatId ?: return
+        val model = current.installed.firstOrNull { it.id == current.chatModelId } ?: return
+        repository.saveChat(SavedLocalChat(id, model.id, model.displayName, current.chatTitle,
+            System.currentTimeMillis(), current.exchanges.map { SavedLocalTurn(it.question, it.answer) }))
+        mutableState.update { it.copy(history = repository.chats()) }
     }
 
     private fun unload() {

@@ -9,6 +9,8 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
 import java.util.UUID
+import org.json.JSONArray
+import org.json.JSONObject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
@@ -45,6 +47,49 @@ internal class LocalModelRepository(context: Context) {
         .sortedBy { it.displayName.lowercase() }
 
     fun selectedId(): String? = metadata.getString("selected", null)
+
+    fun chats(): List<SavedLocalChat> = runCatching {
+        val stored = JSONArray(metadata.getString("chats", "[]"))
+        (0 until stored.length()).mapNotNull { index ->
+            val chat = stored.optJSONObject(index) ?: return@mapNotNull null
+            val turns = chat.optJSONArray("turns") ?: JSONArray()
+            SavedLocalChat(
+                id = chat.optString("id"), modelId = chat.optString("modelId"),
+                modelName = chat.optString("modelName"), title = chat.optString("title"),
+                updatedAt = chat.optLong("updatedAt"),
+                turns = (0 until turns.length()).mapNotNull { turnIndex ->
+                    turns.optJSONObject(turnIndex)?.let { SavedLocalTurn(it.optString("question"), it.optString("answer")) }
+                },
+            ).takeIf { it.id.isNotBlank() && it.modelId.isNotBlank() }
+        }.sortedByDescending(SavedLocalChat::updatedAt)
+    }.getOrDefault(emptyList())
+
+    fun saveChat(chat: SavedLocalChat) {
+        val chats = (chats().filterNot { it.id == chat.id } + chat)
+            .sortedByDescending(SavedLocalChat::updatedAt).take(100)
+        val stored = JSONArray()
+        chats.forEach { value ->
+            val turns = JSONArray()
+            value.turns.forEach { turn -> turns.put(JSONObject().put("question", turn.question).put("answer", turn.answer)) }
+            stored.put(JSONObject().put("id", value.id).put("modelId", value.modelId)
+                .put("modelName", value.modelName).put("title", value.title)
+                .put("updatedAt", value.updatedAt).put("turns", turns))
+        }
+        metadata.edit().putString("chats", stored.toString()).apply()
+    }
+
+    fun deleteChat(id: String) {
+        val remaining = chats().filterNot { it.id == id }
+        val stored = JSONArray()
+        remaining.forEach { chat ->
+            val turns = JSONArray()
+            chat.turns.forEach { turns.put(JSONObject().put("question", it.question).put("answer", it.answer)) }
+            stored.put(JSONObject().put("id", chat.id).put("modelId", chat.modelId)
+                .put("modelName", chat.modelName).put("title", chat.title)
+                .put("updatedAt", chat.updatedAt).put("turns", turns))
+        }
+        metadata.edit().putString("chats", stored.toString()).apply()
+    }
 
     fun select(id: String) {
         require(installed().any { it.id == id }) { "Сначала добавьте модель в приложение" }
@@ -137,7 +182,7 @@ internal class LocalModelRepository(context: Context) {
             }
             val connection = (URL(url).openConnection() as HttpURLConnection).apply {
                 connectTimeout = 30_000; readTimeout = 30_000; instanceFollowRedirects = true
-                setRequestProperty("User-Agent", "SnowSeek-Android/0.5.1")
+                setRequestProperty("User-Agent", "SnowSeek-Android/0.6.0")
                 if (offset > 0) setRequestProperty("Range", "bytes=$offset-")
             }
             try {

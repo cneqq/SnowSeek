@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -25,7 +26,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.StopCircle
 import androidx.compose.material3.AlertDialog
@@ -61,6 +67,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.snowseek.app.local.DeviceModelFitEvaluator
 import dev.snowseek.app.local.InstalledModel
 import dev.snowseek.app.local.ModelCatalogEntry
+import dev.snowseek.app.local.ModelTaskFolder
+import dev.snowseek.app.local.SavedLocalChat
 
 @Composable
 internal fun LocalModelScreen(onBack: () -> Unit) {
@@ -69,6 +77,8 @@ internal fun LocalModelScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val w = LocalWords.current
     var deleteModelId by rememberSaveable { mutableStateOf<String?>(null) }
+    var showNewChat by rememberSaveable { mutableStateOf(false) }
+    var expandedFolders by rememberSaveable { mutableStateOf(emptySet<ModelTaskFolder>()) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let(model::import)
     }
@@ -77,11 +87,15 @@ internal fun LocalModelScreen(onBack: () -> Unit) {
 
     Scaffold(topBar = {
         TopAppBar(
-            title = { Text(if (state.chatModelId != null) state.installed.firstOrNull { it.id == state.chatModelId }?.displayName
-                ?: w.text("Локальный чат", "Local chat") else w.text("Локальные модели", "Local models")) },
+            title = { Text(if (state.chatModelId != null) state.chatTitle else w.text("Локальные модели", "Local models")) },
             navigationIcon = {
                 IconButton(onClick = { if (state.chatModelId != null) model.backToLibrary() else onBack() }) {
                     Icon(Icons.AutoMirrored.Outlined.ArrowBack, w.text("Назад", "Back"))
+                }
+            },
+            actions = {
+                if (state.chatModelId != null && state.installed.isNotEmpty()) {
+                    IconButton(onClick = { showNewChat = true }) { Icon(Icons.Outlined.Add, w.text("Новый чат", "New chat")) }
                 }
             },
         )
@@ -100,6 +114,20 @@ internal fun LocalModelScreen(onBack: () -> Unit) {
                         "Replies are generated on your phone. Internet is only needed to download models."),
                         style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+                item {
+                    Button(onClick = { showNewChat = true }, enabled = state.installed.isNotEmpty(),
+                        modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Outlined.Add, null)
+                        Text("  ${w.text("Новый чат", "New chat")}")
+                    }
+                }
+                if (state.history.isNotEmpty()) {
+                    item { Text(w.text("История чатов", "Chat history"), style = MaterialTheme.typography.titleMedium) }
+                    items(state.history, key = { "chat-${it.id}" }) { chat ->
+                        SavedLocalChatCard(chat, onOpen = { model.openSavedChat(chat.id) },
+                            onDelete = { model.deleteSavedChat(chat.id) })
+                    }
+                }
                 item { Text(w.text("Установлены", "Installed"), style = MaterialTheme.typography.titleMedium) }
                 if (state.installed.isEmpty()) item {
                     Text(w.text("Пока нет установленных моделей. Скачайте модель из каталога или выберите свой файл.",
@@ -110,13 +138,27 @@ internal fun LocalModelScreen(onBack: () -> Unit) {
                     InstalledModelCard(installed, selected = installed.id == state.selectedId,
                         onOpen = { model.openChat(installed.id) }, onDelete = { deleteModelId = installed.id })
                 }
-                item { Text(w.text("Каталог", "Catalogue"), style = MaterialTheme.typography.titleMedium) }
-                items(state.catalog, key = { it.id }) { entry ->
-                    val isInstalled = state.installed.any { it.id == entry.id }
-                    CatalogueModelCard(entry, isInstalled, state.selectedId == entry.id,
-                        state.downloadingId == entry.id, state.verifying && state.downloadingId == entry.id,
-                        state.downloadedBytes, context, onDownload = { model.download(entry) }, onOpen = { model.openChat(entry.id) },
-                        onCancel = model::cancelTransfer)
+                item { Text(w.text("Каталог по задачам", "Catalogue by task"), style = MaterialTheme.typography.titleMedium) }
+                ModelTaskFolder.entries.forEach { folder ->
+                    val entries = state.catalog.filter { it.folder == folder }
+                    if (entries.isNotEmpty()) {
+                        item(key = "folder-${folder.name}") {
+                            TextButton(onClick = {
+                                expandedFolders = if (folder in expandedFolders) expandedFolders - folder else expandedFolders + folder
+                            }, modifier = Modifier.fillMaxWidth()) {
+                                Icon(Icons.Outlined.Folder, null)
+                                Text("  ${folder.title(w)} · ${entries.size}", Modifier.weight(1f))
+                                Icon(if (folder in expandedFolders) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore, null)
+                            }
+                        }
+                        if (folder in expandedFolders) items(entries, key = { it.id }) { entry ->
+                            val isInstalled = state.installed.any { it.id == entry.id }
+                            CatalogueModelCard(entry, isInstalled, state.selectedId == entry.id,
+                                state.downloadingId == entry.id, state.verifying && state.downloadingId == entry.id,
+                                state.downloadedBytes, context, onDownload = { model.download(entry) }, onOpen = { model.openChat(entry.id) },
+                                onCancel = model::cancelTransfer)
+                        }
+                    }
                 }
                 item {
                     Button(onClick = { picker.launch(arrayOf("application/octet-stream", "*/*")) },
@@ -142,6 +184,21 @@ internal fun LocalModelScreen(onBack: () -> Unit) {
         }
     }
 
+    if (showNewChat) AlertDialog(
+        onDismissRequest = { showNewChat = false },
+        title = { Text(w.text("Новый чат", "New chat")) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(w.text("Выберите установленную модель", "Choose an installed model"))
+                state.installed.forEach { installed ->
+                    TextButton(onClick = { showNewChat = false; model.openChat(installed.id) }, modifier = Modifier.fillMaxWidth()) {
+                        Text("${installed.displayName} · ${installed.format.extension.uppercase()}", Modifier.fillMaxWidth())
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { showNewChat = false }) { Text(w.text("Отмена", "Cancel")) } },
+    )
     val deleting = state.installed.firstOrNull { it.id == deleteModelId }
     if (deleting != null) AlertDialog(
         onDismissRequest = { deleteModelId = null },
@@ -152,6 +209,33 @@ internal fun LocalModelScreen(onBack: () -> Unit) {
         } },
         dismissButton = { TextButton(onClick = { deleteModelId = null }) { Text(w.text("Отмена", "Cancel")) } },
     )
+}
+
+@Composable
+private fun SavedLocalChatCard(chat: SavedLocalChat, onOpen: () -> Unit, onDelete: () -> Unit) {
+    val w = LocalWords.current
+    Card(shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+        Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f).clickable(onClick = onOpen).padding(vertical = 5.dp)) {
+                Text(chat.title, style = MaterialTheme.typography.titleSmall, maxLines = 1)
+                Text("${chat.modelName} · ${chat.turns.size} ${w.text("сообщений", "messages")}",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+            }
+            IconButton(onClick = onOpen) { Icon(Icons.Outlined.ChatBubbleOutline, w.text("Открыть чат", "Open chat")) }
+            IconButton(onClick = onDelete) { Icon(Icons.Outlined.DeleteOutline, w.text("Удалить чат", "Delete chat")) }
+        }
+    }
+}
+
+private fun ModelTaskFolder.title(w: Words): String = when (this) {
+    ModelTaskFolder.QUICK -> w.text("Быстрые ответы", "Quick answers")
+    ModelTaskFolder.GENERAL -> w.text("Общие задачи", "General tasks")
+    ModelTaskFolder.CHAT -> w.text("Общение", "Conversation")
+    ModelTaskFolder.WRITING -> w.text("Тексты и перевод", "Writing and translation")
+    ModelTaskFolder.CODING -> w.text("Программирование", "Coding")
+    ModelTaskFolder.MATH -> w.text("Математика", "Math")
+    ModelTaskFolder.REASONING -> w.text("Рассуждения", "Reasoning")
 }
 
 @Composable
@@ -174,7 +258,7 @@ private fun InstalledModelCard(model: InstalledModel, selected: Boolean, onOpen:
                 Text(if (selected) w.text("Выбрана", "Selected") else model.memoryEstimate ?: w.text("Оценка примерная", "Rough estimate"),
                     Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Button(onClick = onOpen) { Text(if (selected) w.text("Открыть чат", "Open chat") else w.text("Выбрать", "Select")) }
+                Button(onClick = onOpen) { Text(w.text("Новый чат", "New chat")) }
             }
         }
     }
