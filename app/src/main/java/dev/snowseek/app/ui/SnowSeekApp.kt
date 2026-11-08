@@ -564,18 +564,13 @@ private fun MessageList(
         if (!atBottom) {
             val scope = rememberCoroutineScope()
             val w = LocalWords.current
-            val nextRequest = ((listState.firstVisibleItemIndex + 1) until chat.messages.size).firstOrNull {
-                chat.messages[it].role == dev.snowseek.core.MessageRole.USER
-            }
             SmallFloatingActionButton(onClick = {
-                followLatest = nextRequest == null
-                scope.launch { listState.scrollToItem(nextRequest ?: chat.messages.size) }
+                followLatest = true
+                scope.launch { listState.scrollToItem(chat.messages.size) }
             },
                 modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = composerInset).padding(12.dp),
                 containerColor = MaterialTheme.colorScheme.primaryContainer) {
-                Icon(Icons.Outlined.ArrowDownward,
-                    if (nextRequest != null) w.text("К следующему запросу", "Jump to next request")
-                    else w.text("К последнему сообщению", "Jump to latest message"))
+                Icon(Icons.Outlined.ArrowDownward, w.text("В конец чата", "Jump to bottom"))
             }
         }
     }
