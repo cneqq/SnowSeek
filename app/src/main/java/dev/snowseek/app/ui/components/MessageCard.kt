@@ -133,7 +133,9 @@ fun MessageCard(
                 }
                 Spacer(Modifier.height(12.dp))
             }
-            MarkdownText(text)
+            CompositionLocalProvider(LocalSearchCitations provides message.citations) {
+                MarkdownText(text)
+            }
             if (generating || revealing) {
                 Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     CircularProgressIndicator(Modifier.size(13.dp), strokeWidth = 2.dp)

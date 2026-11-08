@@ -130,6 +130,7 @@ class DeepSeekWebProvider(
                 continuable = role == MessageRole.ASSISTANT && item.text("status") == "INCOMPLETE",
                 regenerable = role == MessageRole.ASSISTANT && (item["ban_regenerate"] as? JsonPrimitive)?.booleanOrNull != true,
                 attachments = readAttachments(item).ifEmpty { cached[item.text("message_id")]?.attachments.orEmpty() },
+                citations = searchCitations(fragments),
                 instruction = request?.instruction)
             tree.record(message, item.text("parent_id"))
             message
@@ -368,6 +369,7 @@ class DeepSeekWebProvider(
                 if (previous != null && status == previous.status && answer == previous.text && reasoning == previous.reasoning) continue
                 return@withTimeoutOrNull ChatMessage(id, MessageRole.ASSISTANT, answer, reasoning,
                     status, timestamp(response, "inserted_at"), continuable = status == MessageStatus.STOPPED,
+                    citations = searchCitations(fragments),
                     regenerable = (response["ban_regenerate"] as? JsonPrimitive)?.booleanOrNull != true)
             }
             null

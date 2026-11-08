@@ -12,12 +12,15 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
@@ -37,6 +40,9 @@ import io.github.darriousliu.katex.mathdisplay.parse.MTParseError
 import io.github.darriousliu.katex.mathdisplay.parse.MTParseErrors
 import io.github.darriousliu.katex.mathdisplay.render.MTFontManager
 import io.github.darriousliu.katex.mathdisplay.render.MTTypesetter
+import dev.snowseek.core.SearchCitation
+
+internal val LocalSearchCitations = staticCompositionLocalOf<List<SearchCitation>> { emptyList() }
 
 @Composable
 internal fun MarkdownInline(
@@ -50,10 +56,11 @@ internal fun MarkdownInline(
     val color = MaterialTheme.colorScheme.onSurface
     val size = with(density) { style.fontSize.toPx() }
     val width = with(density) { maxWidth.toPx() }
-    val (text, inlineContent) = remember(source, size, width, density, color) {
+    val citations = LocalSearchCitations.current
+    val (text, inlineContent) = remember(source, size, width, density, color, citations) {
         val formulas = mutableMapOf<String, InlineTextContent>()
         val text = buildAnnotatedString {
-            appendMarkdown(source) { latex, original ->
+            appendMarkdown(source, citations) { latex, original ->
                 val math = typeset(latex, size, MTLineStyle.KMTLineStyleText)
                 if (math == null || math.width > width) {
                     append(original)
@@ -74,6 +81,7 @@ internal fun MarkdownInline(
 
 private fun AnnotatedString.Builder.appendMarkdown(
     source: String,
+    citations: List<SearchCitation>,
     appendMath: AnnotatedString.Builder.(latex: String, original: String) -> Unit,
 ) {
     var end = 0
@@ -83,7 +91,7 @@ private fun AnnotatedString.Builder.appendMarkdown(
         val groups = match.groups
         when {
             groups["bold"] != null -> {
-                appendMarkdown(groups["bold"]!!.value, appendMath)
+                appendMarkdown(groups["bold"]!!.value, citations, appendMath)
                 addStyle(SpanStyle(fontWeight = FontWeight.Bold), start, length)
             }
             groups["code"] != null -> {
@@ -91,6 +99,14 @@ private fun AnnotatedString.Builder.appendMarkdown(
                 addStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = Color(0x224163EB)), start, length)
             }
             groups["label"] != null -> append("${groups["label"]!!.value} (${groups["url"]!!.value})")
+            groups["citation"] != null -> {
+                val number = groups["citation"]!!.value
+                append("[$number]")
+                val citation = citations.firstOrNull { it.index.toString() == number }
+                if (citation != null) {
+                    addLink(LinkAnnotation.Url(citation.url, TextLinkStyles(SpanStyle(fontWeight = FontWeight.SemiBold))), start, length)
+                }
+            }
             else -> appendMath((groups["paren"] ?: groups["dollar"])!!.value, match.value)
         }
         end = match.range.last + 1

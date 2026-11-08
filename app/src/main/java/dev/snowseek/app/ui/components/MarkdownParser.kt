@@ -21,7 +21,7 @@ private val tablePipe = Regex("""\\\||\|""")
 
 internal val inlinePattern = Regex(
     """\*\*(?<bold>.+?)\*\*|`(?<code>[^`]+)`|\[(?<label>[^]]+)]\((?<url>https?://[^)]+)\)|""" +
-        """(?<!\\)\\\((?<paren>[^\n]+?)\\\)|""" +
+        """\[citation:(?<citation>\d+)]|(?<!\\)\\\((?<paren>[^\n]+?)\\\)|""" +
         """(?<![\\$])\$(?![\s$])(?<dollar>(?:\\.|[^\\$`\n])+?)(?<!\s)\$(?![\d$])""",
 )
 

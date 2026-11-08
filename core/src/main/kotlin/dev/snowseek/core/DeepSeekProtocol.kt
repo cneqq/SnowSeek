@@ -30,6 +30,17 @@ class DeepSeekDeliveryUncertain(detail: String? = null) : DeepSeekFailure(
 internal fun JsonObject.text(key: String): String? = (get(key) as? JsonPrimitive)?.contentOrNull
 internal fun JsonObject.array(key: String): JsonArray = get(key) as? JsonArray ?: JsonArray(emptyList())
 
+internal fun searchCitations(fragments: List<JsonObject>): List<SearchCitation> =
+    fragments.filter { it.text("type") == "SEARCH" && it.text("status") != "FAILED" }
+        .flatMap { it.array("results").filterIsInstance<JsonObject>() }
+        .mapNotNull { result ->
+            val index = (result.text("cite_index") ?: result.text("citeIndex"))?.toIntOrNull() ?: return@mapNotNull null
+            val url = result.text("url") ?: return@mapNotNull null
+            val uri = runCatching { java.net.URI(url) }.getOrNull() ?: return@mapNotNull null
+            if (index < 1 || uri.scheme !in setOf("http", "https") || uri.host == null || uri.rawUserInfo != null) return@mapNotNull null
+            SearchCitation(index, result.text("title").orEmpty(), url)
+        }.distinctBy { it.index }
+
 /** Reconstructs the compressed p/o/v patches verified against the supplied HAR streams. */
 class DeepSeekStreamDecoder {
     private var root = JsonObject(emptyMap())
@@ -79,6 +90,7 @@ class DeepSeekStreamDecoder {
             fragments.filter { it.text("type") == "RESPONSE" }.joinToString("") { it.text("content").orEmpty() },
             fragments.filter { it.text("type") == "THINK" }.joinToString("") { it.text("content").orEmpty() }, status,
             continuable = response?.text("status") == "INCOMPLETE",
+            citations = searchCitations(fragments),
             regenerable = (response?.get("ban_regenerate") as? JsonPrimitive)?.booleanOrNull != true)
     }
     fun completed(): Boolean = closed && (root["response"] as? JsonObject)?.text("status") == "FINISHED"

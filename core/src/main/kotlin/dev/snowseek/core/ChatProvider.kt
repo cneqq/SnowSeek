@@ -27,6 +27,9 @@ data class ChatAttachment(
 data class UploadFile(val name: String, val contentType: String, val size: Long, val openStream: () -> java.io.InputStream)
 
 @Serializable
+data class SearchCitation(val index: Int, val title: String, val url: String)
+
+@Serializable
 data class ChatMessage(
     val id: String,
     val role: MessageRole,
@@ -43,6 +46,7 @@ data class ChatMessage(
     val regenerable: Boolean = true,
     @kotlinx.serialization.Transient
     val attachments: List<ChatAttachment> = emptyList(),
+    val citations: List<SearchCitation> = emptyList(),
     val instruction: ChatInstruction? = null,
 )
 
