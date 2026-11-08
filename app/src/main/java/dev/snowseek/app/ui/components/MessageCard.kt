@@ -71,11 +71,14 @@ fun MessageCard(
                 Column(Modifier.padding(horizontal = 18.dp, vertical = 14.dp)) {
                     var expanded by rememberSaveable(message.id, message.text) { mutableStateOf(false) }
                     var overflows by remember(message.id, message.text) { mutableStateOf(false) }
-                    Text(message.text, style = MaterialTheme.typography.bodyLarge,
+                    if (message.text.isNotBlank()) Text(message.text, style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onPrimaryContainer,
                         maxLines = if (expanded) Int.MAX_VALUE else 6,
                         overflow = TextOverflow.Ellipsis,
                         onTextLayout = { if (!expanded) overflows = it.hasVisualOverflow })
+                    if (message.text.isBlank() && message.attachments.isEmpty()) {
+                        Text(w.text("Вложение недоступно", "Attachment unavailable"), style = MaterialTheme.typography.bodyMedium)
+                    }
                     if (expanded || overflows) {
                         TextButton(onClick = { expanded = !expanded }) {
                             Text(if (expanded) w.text("Свернуть", "Collapse") else w.text("Развернуть", "Expand"))
@@ -84,8 +87,9 @@ fun MessageCard(
                     message.attachments.forEach { attachment ->
                         key(attachment.id) {
                             val photo = attachmentPhotos[attachment.id]
-                            if (photo != null) {
-                                PhotoAttachment(photo, attachment.name, Modifier.padding(top = 8.dp).size(width = 120.dp, height = 90.dp))
+                            if (photo != null || attachment.previewUrl != null) {
+                                PhotoAttachment(photo, attachment.name, Modifier.padding(top = 8.dp).size(width = 120.dp, height = 90.dp),
+                                    previewUrl = attachment.previewUrl)
                             } else Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Icon(Icons.Outlined.AttachFile, null, Modifier.size(16.dp))

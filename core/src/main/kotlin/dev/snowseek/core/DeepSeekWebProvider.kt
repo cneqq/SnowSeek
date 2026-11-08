@@ -126,7 +126,7 @@ class DeepSeekWebProvider(
                 if (item.text("status") in listOf("FINISHED", "COMPLETE")) MessageStatus.COMPLETE else MessageStatus.STOPPED,
                 timestamp(item, "inserted_at"),
                 editable = (item["ban_edit"] as? JsonPrimitive)?.booleanOrNull != true &&
-                    (role != MessageRole.USER || fragments.all { it.text("type") == "REQUEST" }),
+                    (role != MessageRole.USER || fragments.all { it.text("type") in setOf("REQUEST", "FILE") }),
                 continuable = role == MessageRole.ASSISTANT && item.text("status") == "INCOMPLETE",
                 regenerable = role == MessageRole.ASSISTANT && (item["ban_regenerate"] as? JsonPrimitive)?.booleanOrNull != true,
                 attachments = readAttachments(item).ifEmpty { cached[item.text("message_id")]?.attachments.orEmpty() },
@@ -429,17 +429,36 @@ class DeepSeekWebProvider(
     }
     private fun readAttachments(item: JsonObject): List<ChatAttachment> {
         val result = linkedMapOf<String, ChatAttachment>()
-        for (key in listOf("ref_files", "files", "ref_file_ids")) {
-            for (raw in item.array(key)) {
-                val metadata = raw as? JsonObject
-                val id = metadata?.text("id") ?: metadata?.text("file_id") ?: (raw as? JsonPrimitive)?.contentOrNull ?: continue
-                val file = if (metadata != null) ChatAttachment(id, metadata.text("file_name") ?: metadata.text("name") ?: "Вложение",
-                    metadata.text("file_size")?.toLongOrNull() ?: 0, metadata.text("status") ?: "SUCCESS")
-                    else result[id] ?: files[id] ?: ChatAttachment(id, "Вложение")
-                result[id] = file; files[id] = file
-            }
+        val fragmentFiles = item.array("fragments").filterIsInstance<JsonObject>()
+            .filter { it.text("type") == "FILE" }.flatMap { it.array("files") }
+        val entries = item.array("ref_file_ids") + item.array("files") + item.array("ref_files") + fragmentFiles
+        for (raw in entries) {
+            val metadata = raw as? JsonObject
+            val id = metadata?.text("id") ?: metadata?.text("file_id") ?: (raw as? JsonPrimitive)?.contentOrNull ?: continue
+            val previous = result[id] ?: files[id] ?: ChatAttachment(id, "Вложение")
+            val file = if (metadata != null) previous.copy(
+                name = metadata.text("file_name") ?: metadata.text("name") ?: previous.name,
+                size = metadata.text("file_size")?.toLongOrNull() ?: previous.size,
+                status = metadata.text("status") ?: previous.status,
+                previewUrl = if (metadata.containsKey("signed_path") || metadata.containsKey("audit_result")) {
+                    attachmentPreviewUrl(metadata)
+                } else previous.previewUrl,
+            ) else previous
+            result[id] = file
+            files[id] = file
         }
         return result.values.toList()
+    }
+
+    private fun attachmentPreviewUrl(file: JsonObject): String? {
+        if (file.text("is_image") != "true" || file.text("audit_result") != "pass") return null
+        val path = file.text("signed_path") ?: return null
+        val candidate = if (path.startsWith('/') && !path.startsWith("//")) "https://files.deepseeksvc.com/api$path" else path
+        val uri = runCatching { java.net.URI(candidate) }.getOrNull() ?: return null
+        return candidate.takeIf {
+            uri.scheme == "https" && uri.host == "files.deepseeksvc.com" && uri.rawUserInfo == null &&
+                uri.rawFragment == null && uri.port in listOf(-1, 443)
+        }
     }
     suspend fun uploadAttachment(file: UploadFile, deepThink: Boolean = false): ChatAttachment {
         val remote = api()

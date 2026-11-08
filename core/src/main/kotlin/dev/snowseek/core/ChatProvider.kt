@@ -14,7 +14,13 @@ enum class MessageRole { USER, ASSISTANT }
 enum class MessageStatus { COMPLETE, GENERATING, STOPPED, ERROR }
 
 @Serializable
-data class ChatAttachment(val id: String, val name: String, val size: Long = 0, val status: String = "SUCCESS")
+data class ChatAttachment(
+    val id: String,
+    val name: String,
+    val size: Long = 0,
+    val status: String = "SUCCESS",
+    @kotlinx.serialization.Transient val previewUrl: String? = null,
+)
 
 /** A selected document is read only when the user explicitly attaches it. */
 data class UploadFile(val name: String, val contentType: String, val size: Long, val openStream: () -> java.io.InputStream)
