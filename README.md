@@ -3,6 +3,10 @@
 <p align="center">Неофициальный Android-клиент DeepSeek с нативным интерфейсом.</p>
 
 <p align="center">
+  <a href="https://github.com/cneqq/SnowSeek/releases/tag/v0.3.7"><img src="https://img.shields.io/badge/Release-0.3.7-eeeeee?style=for-the-badge&amp;labelColor=242424" alt="Release 0.3.7"></a>
+</p>
+
+<p align="center">
   <a href="https://github.com/cneqq/SnowSeek/releases">Скачать APK</a> ·
   <a href="https://github.com/cneqq/SnowSeek/actions/workflows/android.yml">Сборки</a> ·
   <a href="https://github.com/cneqq/SnowSeek/issues">Сообщить об ошибке</a>
