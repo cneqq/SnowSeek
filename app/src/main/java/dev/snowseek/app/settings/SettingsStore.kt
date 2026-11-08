@@ -53,6 +53,8 @@ data class AppSettings(
     val customInstructions: List<ChatInstruction> = emptyList(),
     val glass: GlassSettings = GlassSettings(),
     val photoCacheLimit: PhotoCacheLimit = PhotoCacheLimit.MB_500,
+    val deepThink: Boolean = false,
+    val search: Boolean = false,
 )
 
 class SettingsStore(context: Context) : AppliedInstructionStore {
@@ -66,6 +68,8 @@ class SettingsStore(context: Context) : AppliedInstructionStore {
             language = validLanguage(values[LANGUAGE] ?: "ru"),
             textScale = validScale(values[TEXT_SCALE] ?: 1f),
             animations = values[ANIMATIONS] ?: true,
+            deepThink = values[DEEP_THINK] ?: false,
+            search = values[SEARCH] ?: false,
             hideInstructions = values[HIDE_INSTRUCTIONS] ?: false,
             photoCacheLimit = PhotoCacheLimit.entries.firstOrNull { it.name == values[PHOTO_CACHE_LIMIT] }
                 ?: PhotoCacheLimit.MB_500,
@@ -86,6 +90,8 @@ class SettingsStore(context: Context) : AppliedInstructionStore {
     suspend fun updateLanguage(value: String) { store.edit { it[LANGUAGE] = validLanguage(value) } }
     suspend fun updateTextScale(value: Float) { store.edit { it[TEXT_SCALE] = validScale(value) } }
     suspend fun updateAnimations(value: Boolean) { store.edit { it[ANIMATIONS] = value } }
+    suspend fun toggleDeepThink() { store.edit { it[DEEP_THINK] = !(it[DEEP_THINK] ?: false) } }
+    suspend fun toggleSearch() { store.edit { it[SEARCH] = !(it[SEARCH] ?: false) } }
     suspend fun updateHideInstructions(value: Boolean) { store.edit { it[HIDE_INSTRUCTIONS] = value } }
     suspend fun updatePhotoCacheLimit(value: PhotoCacheLimit) { store.edit { it[PHOTO_CACHE_LIMIT] = value.name } }
     suspend fun updateGlass(value: GlassSettings) {
@@ -129,6 +135,8 @@ class SettingsStore(context: Context) : AppliedInstructionStore {
         val LANGUAGE = stringPreferencesKey("language")
         val TEXT_SCALE = floatPreferencesKey("text_scale")
         val ANIMATIONS = booleanPreferencesKey("animations")
+        val DEEP_THINK = booleanPreferencesKey("deep_think")
+        val SEARCH = booleanPreferencesKey("search")
         val HIDE_INSTRUCTIONS = booleanPreferencesKey("hide_instructions")
         val PHOTO_CACHE_LIMIT = stringPreferencesKey("photo_cache_limit")
         val WELCOME = booleanPreferencesKey("welcome_complete")

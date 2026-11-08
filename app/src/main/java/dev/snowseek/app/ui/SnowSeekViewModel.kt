@@ -87,6 +87,7 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
             photoCache.setLimit(it.photoCacheLimit)
         }
         lastSettings = it
+        mutableUi.update { state -> state.copy(deepThink = it.deepThink, search = it.search) }
         mutableSettingsReady.value = true
     }
         .stateIn(viewModelScope, SharingStarted.Eagerly, AppSettings())
@@ -128,7 +129,8 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
                 photoCache.clear()
                 observedRevision = credentials.changes.value
                 mutableUi.value = ChatUiState(authenticated = credentials.token() != null,
-                    sessionChanging = loggingOut, signingOut = loggingOut)
+                    sessionChanging = loggingOut, signingOut = loggingOut,
+                    deepThink = lastSettings.deepThink, search = lastSettings.search)
                 bindProvider()
                 if (!loggingOut) initialize()
             }
@@ -149,7 +151,8 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
     fun initialize() {
         if (loggingOut || initialization?.isActive == true) return
         if (credentials.token() == null) {
-            mutableUi.value = ChatUiState(authenticated = false, loading = false, initialized = true)
+            mutableUi.value = ChatUiState(authenticated = false, loading = false, initialized = true,
+                deepThink = lastSettings.deepThink, search = lastSettings.search)
             return
         }
         mutableUi.update { it.copy(authenticated = true, loading = true, error = false, errorMessage = null) }
@@ -327,8 +330,8 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
             finally { if (historyRevision == ticket && ui.value.selectedId == id) mutableUi.update { it.copy(loading = false) } }
         }
     }
-    fun deepThink() { mutableUi.update { it.copy(deepThink = !it.deepThink) } }
-    fun search() { mutableUi.update { it.copy(search = !it.search) } }
+    fun deepThink() = save { preferences.toggleDeepThink() }
+    fun search() = save { preferences.toggleSearch() }
     fun dismissError() { mutableUi.update { it.copy(error = false, errorMessage = null, signedOut = false) } }
 
     fun newChat() {
@@ -498,7 +501,8 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
                 catch (_: Exception) { /* Signing out must also work when server stop fails. */ }
                 generation?.cancelAndJoin()
                 WebSession.clear(getApplication())
-                mutableUi.value = ChatUiState(authenticated = false, loading = false, initialized = true)
+                mutableUi.value = ChatUiState(authenticated = false, loading = false, initialized = true,
+                    deepThink = lastSettings.deepThink, search = lastSettings.search)
             } finally {
                 loggingOut = false
                 mutableUi.update { it.copy(signingOut = false, sessionChanging = false) }
