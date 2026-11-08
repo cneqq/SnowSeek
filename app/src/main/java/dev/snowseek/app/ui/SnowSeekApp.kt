@@ -281,19 +281,22 @@ private fun ChatScreen(ui: ChatUiState, settings: AppSettings, model: SnowSeekVi
                 CenterAlignedTopAppBar(
                     title = {
                         Text(current?.let { chatTitle(it, w) } ?: "SnowSeek",
-                            modifier = if (requests.isEmpty()) Modifier else Modifier.clickable(
-                                onClickLabel = w.text("История запросов", "Request history"),
-                                onClick = { showRequests = true },
-                            ).padding(vertical = 10.dp),
                             maxLines = 1, overflow = TextOverflow.Ellipsis,
                             style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     },
                     navigationIcon = { IconButton(onClick = { scope.launch { drawer.open() } }) { Icon(Icons.Outlined.Menu, w.text("История чатов", "Chat history")) } },
-                    actions = { IconButton(onClick = model::newChat,
-                        modifier = Modifier.padding(end = 8.dp),
-                        enabled = !ui.generating && !ui.loading && !ui.uploading && ui.initialized) {
-                        RoundNewChatIcon(w.text("Новый чат", "New chat"))
-                    } },
+                    actions = {
+                        if (requests.isNotEmpty()) {
+                            FilledTonalIconButton(onClick = { keyboard?.hide(); showRequests = true }) {
+                                Icon(Icons.Outlined.History, w.text("История запросов", "Request history"))
+                            }
+                        }
+                        IconButton(onClick = model::newChat,
+                            modifier = Modifier.padding(end = 8.dp),
+                            enabled = !ui.generating && !ui.loading && !ui.uploading && ui.initialized) {
+                            RoundNewChatIcon(w.text("Новый чат", "New chat"))
+                        }
+                    },
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
                 )
             },
@@ -303,7 +306,7 @@ private fun ChatScreen(ui: ChatUiState, settings: AppSettings, model: SnowSeekVi
                 ChatComposerLayout(
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                     overlay = backdrop != null,
-                    composer = { Composer(ui, model, settings.glass, backdrop) },
+                    composer = { Composer(ui, model, settings.glass, backdrop, settings.hideInstructions) },
                 ) { composerInset ->
                     if (!ui.initialized && !ui.loading) {
                         Column(Modifier.fillMaxSize().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
@@ -315,6 +318,7 @@ private fun ChatScreen(ui: ChatUiState, settings: AppSettings, model: SnowSeekVi
                         EmptyChat(current?.id ?: "empty-start", Modifier.fillMaxSize())
                     } else {
                         key(current.id) { MessageList(current, settings.animations, Modifier.fillMaxSize(),
+                            hideInstructions = settings.hideInstructions,
                             composerInset = composerInset, backdrop = backdrop,
                             canAct = ui.authenticated && !ui.generating && !ui.loading && !ui.uploading,
                             onEdit = model::editMessage, onContinue = model::continueMessage,
@@ -326,17 +330,30 @@ private fun ChatScreen(ui: ChatUiState, settings: AppSettings, model: SnowSeekVi
             }
         }
     }
-    if (showRequests && requests.isNotEmpty()) AlertDialog(
+    if (showRequests && requests.isNotEmpty()) ModalBottomSheet(
         onDismissRequest = { showRequests = false },
-        title = { Text(w.text("История запросов", "Request history")) },
-        text = {
-            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 420.dp)) {
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+    ) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(w.text("История запросов", "Request history"),
+                    Modifier.weight(1f).padding(start = 12.dp), style = MaterialTheme.typography.titleLarge)
+                IconButton(onClick = { showRequests = false }) {
+                    Icon(Icons.Outlined.Close, w.text("Закрыть", "Close"))
+                }
+            }
+            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 420.dp),
+                contentPadding = PaddingValues(bottom = 12.dp)) {
                 itemsIndexed(requests, key = { _, message -> message.id }) { index, message ->
                     val preview = message.text.trim().take(240).replace(Regex("\\s+"), " ")
                         .ifBlank { message.attachments.firstOrNull()?.name.orEmpty() }
                     ListItem(
                         headlineContent = { Text(preview.ifBlank { w.text("Вложение", "Attachment") }, maxLines = 2, overflow = TextOverflow.Ellipsis) },
-                        leadingContent = { Text("${index + 1}") },
+                        leadingContent = { Text("${index + 1}", style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                        trailingContent = { Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant) },
                         colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
                         modifier = Modifier.clickable {
                             jumpToRequest = message.id
@@ -345,9 +362,8 @@ private fun ChatScreen(ui: ChatUiState, settings: AppSettings, model: SnowSeekVi
                     )
                 }
             }
-        },
-        confirmButton = { TextButton(onClick = { showRequests = false }) { Text(w.text("Закрыть", "Close")) } },
-    )
+        }
+    }
     if (deleteId != null) AlertDialog(onDismissRequest = { deleteId = null },
         title = { Text(w.text("Удалить диалог?", "Delete this conversation?")) },
         text = { Text(w.text("Диалог будет удалён из аккаунта. Отменить это действие нельзя.", "This conversation will be deleted from your account. This cannot be undone.")) },
@@ -401,7 +417,7 @@ private fun MessageList(
     onEdit: (String) -> Unit, onContinue: (String) -> Unit, onRegenerate: (String) -> Unit,
     onVersion: (String, String) -> Unit, canSwitchVersion: Boolean,
     jumpToRequest: String?, onJumpHandled: () -> Unit,
-    composerInset: Dp, backdrop: HazeState?,
+    composerInset: Dp, backdrop: HazeState?, hideInstructions: Boolean,
 ) {
     val words = LocalWords.current
     val listState = rememberLazyListState()
@@ -448,6 +464,7 @@ private fun MessageList(
                 AnimatedVisibility(visible = visible, enter = fadeIn(), exit = fadeOut()) {
                     Column {
                         MessageCard(message, onReasoningToggle = { followLatest = false },
+                            showInstruction = !hideInstructions,
                             animateStreaming = animations,
                             onReveal = {
                                 if (message.id == last?.id && followLatest && !dragged) {
@@ -497,7 +514,7 @@ private fun MessageList(
 }
 
 @Composable
-private fun Composer(ui: ChatUiState, model: SnowSeekViewModel, glass: GlassSettings, backdrop: HazeState?) {
+private fun Composer(ui: ChatUiState, model: SnowSeekViewModel, glass: GlassSettings, backdrop: HazeState?, hideInstructions: Boolean) {
     val w = LocalWords.current
     val keyboard = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
@@ -515,7 +532,7 @@ private fun Composer(ui: ChatUiState, model: SnowSeekViewModel, glass: GlassSett
     Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp).padding(bottom = 20.dp)) {
         ComposerSurface(glass, backdrop) {
             Column(Modifier.padding(8.dp)) {
-                InstructionSelector(ui, model)
+                if (!hideInstructions) InstructionSelector(ui, model)
                 if (ui.editingMessageId != null) {
                     Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -676,6 +693,11 @@ private fun SettingsScreen(
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(w.text("Анимации", "Animations"), Modifier.weight(1f)); Switch(checked = settings.animations, onCheckedChange = model::animations)
+                }
+                Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(w.text("Скрывать инструкции", "Hide instructions"), Modifier.weight(1f))
+                    Switch(checked = settings.hideInstructions, onCheckedChange = model::hideInstructions)
                 }
                 AppearanceSlider(
                     w.text("Масштаб интерфейса", "Interface scale"), "${(settings.textScale * 100).roundToInt()}%",

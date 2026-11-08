@@ -41,6 +41,7 @@ data class AppSettings(
     val language: String = "ru",
     val textScale: Float = 1f,
     val animations: Boolean = true,
+    val hideInstructions: Boolean = false,
     val welcomeComplete: Boolean = false,
     val customInstructions: List<ChatInstruction> = emptyList(),
     val glass: GlassSettings = GlassSettings(),
@@ -57,6 +58,7 @@ class SettingsStore(context: Context) : AppliedInstructionStore {
             language = validLanguage(values[LANGUAGE] ?: "ru"),
             textScale = validScale(values[TEXT_SCALE] ?: 1f),
             animations = values[ANIMATIONS] ?: true,
+            hideInstructions = values[HIDE_INSTRUCTIONS] ?: false,
             welcomeComplete = values[WELCOME] ?: false,
             customInstructions = values[INSTRUCTIONS]?.let { Json.decodeFromString<List<ChatInstruction>>(it) }
                 .orEmpty().filter { it.isValid() && it.id.startsWith("custom.") }.distinctBy { it.id },
@@ -74,6 +76,7 @@ class SettingsStore(context: Context) : AppliedInstructionStore {
     suspend fun updateLanguage(value: String) { store.edit { it[LANGUAGE] = validLanguage(value) } }
     suspend fun updateTextScale(value: Float) { store.edit { it[TEXT_SCALE] = validScale(value) } }
     suspend fun updateAnimations(value: Boolean) { store.edit { it[ANIMATIONS] = value } }
+    suspend fun updateHideInstructions(value: Boolean) { store.edit { it[HIDE_INSTRUCTIONS] = value } }
     suspend fun updateGlass(value: GlassSettings) {
         val glass = value.normalized()
         store.edit {
@@ -115,6 +118,7 @@ class SettingsStore(context: Context) : AppliedInstructionStore {
         val LANGUAGE = stringPreferencesKey("language")
         val TEXT_SCALE = floatPreferencesKey("text_scale")
         val ANIMATIONS = booleanPreferencesKey("animations")
+        val HIDE_INSTRUCTIONS = booleanPreferencesKey("hide_instructions")
         val WELCOME = booleanPreferencesKey("welcome_complete")
         val GLASS_ENABLED = booleanPreferencesKey("composer_glass_enabled")
         val GLASS_BLUR = floatPreferencesKey("composer_glass_blur")

@@ -359,7 +359,7 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
                 activeChatId = chatId
                 val options = ChatOptions(current.deepThink, current.search, settings.value.language,
                     current.attachments, replaceAttachments = current.editingMessageId != null,
-                    instruction = current.selectedInstruction)
+                    instruction = current.selectedInstruction.takeUnless { settings.value.hideInstructions })
                 val stream = current.editingMessageId?.let { provider.editMessage(chatId, it, prompt, options) }
                     ?: provider.sendMessage(chatId, prompt, options)
                 stream.collect { }
@@ -454,6 +454,10 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
     fun language(value: String) = save { preferences.updateLanguage(value) }
     fun textScale(value: Float) = save { preferences.updateTextScale(value) }
     fun animations(value: Boolean) = save { preferences.updateAnimations(value) }
+    fun hideInstructions(value: Boolean) = save {
+        preferences.updateHideInstructions(value)
+        if (value) mutableUi.update { it.copy(selectedInstruction = null) }
+    }
     fun logout() {
         if (ui.value.signingOut) return
         loggingOut = true

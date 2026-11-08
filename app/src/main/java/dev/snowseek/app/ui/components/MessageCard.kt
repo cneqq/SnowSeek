@@ -52,12 +52,13 @@ fun MessageCard(
     onRegenerate: (() -> Unit)? = null,
     animateStreaming: Boolean = false,
     onReveal: () -> Unit = {},
+    showInstruction: Boolean = true,
 ) {
     val w = LocalWords.current
     val user = message.role == MessageRole.USER
     Column(Modifier.fillMaxWidth(), horizontalAlignment = if (user) Alignment.End else Alignment.Start) {
         if (user) {
-            message.instruction?.let { dev.snowseek.app.ui.AppliedInstruction(it) }
+            if (showInstruction) message.instruction?.let { dev.snowseek.app.ui.AppliedInstruction(it) }
             Surface(shape = RoundedCornerShape(22.dp, 22.dp, 6.dp, 22.dp),
                 color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.widthIn(max = 560.dp)
                     .then(if (onEdit != null) Modifier.combinedClickable(
