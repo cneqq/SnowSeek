@@ -3,10 +3,12 @@
 package dev.snowseek.app.ui
 
 import android.content.Intent
+import android.net.Uri
 import androidx.core.net.toUri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -29,6 +31,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.*
@@ -64,6 +67,7 @@ import dev.snowseek.app.settings.FontMode
 import dev.snowseek.app.settings.GlassSettings
 import dev.snowseek.app.settings.ThemeMode
 import dev.snowseek.app.ui.components.MessageCard
+import dev.snowseek.app.ui.components.PhotoAttachment
 import dev.snowseek.app.ui.components.ChatComposerLayout
 import dev.snowseek.app.ui.components.ComposerSurface
 import dev.snowseek.app.ui.components.AppearanceChoice
@@ -319,6 +323,7 @@ private fun ChatScreen(ui: ChatUiState, settings: AppSettings, model: SnowSeekVi
                     } else {
                         key(current.id) { MessageList(current, settings.animations, Modifier.fillMaxSize(),
                             hideInstructions = settings.hideInstructions,
+                            attachmentPhotos = ui.attachmentPhotos,
                             composerInset = composerInset, backdrop = backdrop,
                             canAct = ui.authenticated && !ui.generating && !ui.loading && !ui.uploading,
                             onEdit = model::editMessage, onContinue = model::continueMessage,
@@ -417,7 +422,7 @@ private fun MessageList(
     onEdit: (String) -> Unit, onContinue: (String) -> Unit, onRegenerate: (String) -> Unit,
     onVersion: (String, String) -> Unit, canSwitchVersion: Boolean,
     jumpToRequest: String?, onJumpHandled: () -> Unit,
-    composerInset: Dp, backdrop: HazeState?, hideInstructions: Boolean,
+    composerInset: Dp, backdrop: HazeState?, hideInstructions: Boolean, attachmentPhotos: Map<String, Uri>,
 ) {
     val words = LocalWords.current
     val listState = rememberLazyListState()
@@ -465,6 +470,7 @@ private fun MessageList(
                     Column {
                         MessageCard(message, onReasoningToggle = { followLatest = false },
                             showInstruction = !hideInstructions,
+                            attachmentPhotos = attachmentPhotos,
                             animateStreaming = animations,
                             onReveal = {
                                 if (message.id == last?.id && followLatest && !dragged) {
@@ -521,6 +527,10 @@ private fun Composer(ui: ChatUiState, model: SnowSeekViewModel, glass: GlassSett
     val attachmentPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) model.attachFiles(uris)
     }
+    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(10)) { uris ->
+        if (uris.isNotEmpty()) model.attachFiles(uris, fromPhotoPicker = true)
+    }
+    var showAttachmentOptions by rememberSaveable { mutableStateOf(false) }
     val canSend = ui.initialized && !ui.loading && !ui.uploading &&
         (ui.input.isNotBlank() || ui.attachments.isNotEmpty())
     LaunchedEffect(ui.editingMessageId) {
@@ -562,15 +572,28 @@ private fun Composer(ui: ChatUiState, model: SnowSeekViewModel, glass: GlassSett
                     FlowRow(Modifier.fillMaxWidth().heightIn(max = 120.dp).verticalScroll(rememberScrollState()).padding(horizontal = 4.dp),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         ui.attachments.forEach { attachment ->
-                            InputChip(selected = false, onClick = {}, modifier = Modifier.widthIn(max = 260.dp),
-                                label = { Text(attachment.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                                leadingIcon = { Icon(Icons.Outlined.AttachFile, null, Modifier.size(16.dp)) },
-                                trailingIcon = {
-                                    IconButton(onClick = { model.removeAttachment(attachment.id) },
-                                        enabled = !ui.generating && !ui.uploading, modifier = Modifier.size(24.dp)) {
-                                        Icon(Icons.Outlined.Close, w.text("Удалить вложение", "Remove attachment"), Modifier.size(16.dp))
+                            key(attachment.id) {
+                                val photo = ui.attachmentPhotos[attachment.id]
+                                if (photo != null) {
+                                    Row(Modifier.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        PhotoAttachment(photo, attachment.name, Modifier.size(64.dp))
+                                        IconButton(onClick = { model.removeAttachment(attachment.id) },
+                                            enabled = !ui.generating && !ui.uploading) {
+                                            Icon(Icons.Outlined.Close, w.text("Удалить фото", "Remove photo"), Modifier.size(18.dp))
+                                        }
                                     }
-                                })
+                                } else {
+                                    InputChip(selected = false, onClick = {}, modifier = Modifier.widthIn(max = 260.dp),
+                                        label = { Text(attachment.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                        leadingIcon = { Icon(Icons.Outlined.AttachFile, null, Modifier.size(16.dp)) },
+                                        trailingIcon = {
+                                            IconButton(onClick = { model.removeAttachment(attachment.id) },
+                                                enabled = !ui.generating && !ui.uploading, modifier = Modifier.size(24.dp)) {
+                                                Icon(Icons.Outlined.Close, w.text("Удалить вложение", "Remove attachment"), Modifier.size(16.dp))
+                                            }
+                                        })
+                                }
+                            }
                         }
                     }
                 }
@@ -596,9 +619,26 @@ private fun Composer(ui: ChatUiState, model: SnowSeekViewModel, glass: GlassSett
                     }
                     val actions: @Composable () -> Unit = {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            IconButton(onClick = { attachmentPicker.launch(arrayOf("*/*")) },
-                                enabled = ui.initialized && !ui.generating && !ui.loading && !ui.uploading) {
-                                Icon(Icons.Outlined.AttachFile, w.text("Добавить вложения", "Add attachments"), Modifier.size(22.dp))
+                            Box {
+                                IconButton(onClick = { showAttachmentOptions = true },
+                                    enabled = ui.initialized && !ui.generating && !ui.loading && !ui.uploading) {
+                                    Icon(Icons.Outlined.AttachFile, w.text("Добавить вложения", "Add attachments"), Modifier.size(22.dp))
+                                }
+                                DropdownMenu(expanded = showAttachmentOptions, onDismissRequest = { showAttachmentOptions = false }) {
+                                    DropdownMenuItem(
+                                        text = { Text(w.text("Фото", "Photos")) },
+                                        leadingIcon = { Icon(Icons.Outlined.Image, null) },
+                                        onClick = {
+                                            showAttachmentOptions = false
+                                            photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text(w.text("Файл", "File")) },
+                                        leadingIcon = { Icon(Icons.AutoMirrored.Outlined.InsertDriveFile, null) },
+                                        onClick = { showAttachmentOptions = false; attachmentPicker.launch(arrayOf("*/*")) },
+                                    )
+                                }
                             }
                             FilledIconButton(onClick = {
                                 if (ui.generating) model.stop() else { keyboard?.hide(); model.send() }

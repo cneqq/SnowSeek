@@ -48,6 +48,7 @@ data class ChatUiState(
     val input: String = "",
     val editingMessageId: String? = null,
     val attachments: List<ChatAttachment> = emptyList(),
+    val attachmentPhotos: Map<String, Uri> = emptyMap(),
     val uploading: Boolean = false,
     val loading: Boolean = true,
     val generating: Boolean = false,
@@ -185,7 +186,7 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun input(value: String) { mutableUi.update { it.copy(input = value.take(32_768)) } }
-    fun attachFiles(uris: List<Uri>) {
+    fun attachFiles(uris: List<Uri>, fromPhotoPicker: Boolean = false) {
         val current = ui.value
         if (!current.authenticated || current.signingOut || current.generating || current.loading || current.uploading) return
         if (current.attachments.size + uris.size > 10) {
@@ -200,7 +201,13 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
                     try {
                         val prepared = prepareAttachment(uri, temporary)
                         val ready = web.uploadAttachment(prepared, current.deepThink)
-                        mutableUi.update { it.copy(attachments = (it.attachments + ready).distinctBy { file -> file.id }) }
+                        mutableUi.update { state ->
+                            val photos = if (fromPhotoPicker || prepared.contentType.startsWith("image/")) {
+                                (state.attachmentPhotos - ready.id + (ready.id to uri))
+                                    .entries.toList().takeLast(40).associate { it.key to it.value }
+                            } else state.attachmentPhotos
+                            state.copy(attachments = (state.attachments + ready).distinctBy { it.id }, attachmentPhotos = photos)
+                        }
                     } finally { temporary.delete() }
                 }
             } catch (cancelled: CancellationException) { throw cancelled }

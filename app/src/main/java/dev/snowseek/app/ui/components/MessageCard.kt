@@ -1,5 +1,7 @@
 package dev.snowseek.app.ui.components
 
+import android.net.Uri
+
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -53,6 +55,7 @@ fun MessageCard(
     animateStreaming: Boolean = false,
     onReveal: () -> Unit = {},
     showInstruction: Boolean = true,
+    attachmentPhotos: Map<String, Uri> = emptyMap(),
 ) {
     val w = LocalWords.current
     val user = message.role == MessageRole.USER
@@ -79,11 +82,16 @@ fun MessageCard(
                         }
                     }
                     message.attachments.forEach { attachment ->
-                        Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Icon(Icons.Outlined.AttachFile, null, Modifier.size(16.dp))
-                            Text(attachment.name, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                                style = MaterialTheme.typography.bodySmall)
+                        key(attachment.id) {
+                            val photo = attachmentPhotos[attachment.id]
+                            if (photo != null) {
+                                PhotoAttachment(photo, attachment.name, Modifier.padding(top = 8.dp).size(width = 120.dp, height = 90.dp))
+                            } else Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Icon(Icons.Outlined.AttachFile, null, Modifier.size(16.dp))
+                                Text(attachment.name, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                    style = MaterialTheme.typography.bodySmall)
+                            }
                         }
                     }
                 }
