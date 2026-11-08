@@ -68,24 +68,6 @@ SnowSeek работает с бесплатной веб-версией DeepSeek
 
 При обрыве потока SnowSeek пытается получить ответ из истории. Приложение не отправляет запрос повторно автоматически, чтобы не создавать дубликаты. Рекламы и аналитики нет.
 
-## Сборка
-
-Нужны JDK 21, Android SDK Platform 37.0 и Build Tools 36.0.0. Путь к SDK задайте через `ANDROID_HOME` или `local.properties`.
-
-```sh
-# Linux / macOS
-bash ./gradlew :app:lintDebug :app:assembleDebug
-```
-
-```powershell
-# Windows
-.\gradlew.bat :app:lintDebug :app:assembleDebug
-```
-
-APK: `app/build/outputs/apk/debug/app-debug.apk`. Команда `:app:assembleRelease` собирает Release APK без подписи.
-
-Workflow [Android](.github/workflows/android.yml) проверяет Lint и собирает Debug APK. Публикация подписанного релиза по тегу `v*` требует секретов `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS` и `KEY_PASSWORD` в настройках репозитория.
-
 ## Лицензия
 
 [GNU GPLv3](LICENSE). Сторонние компоненты и их лицензии перечислены в [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
