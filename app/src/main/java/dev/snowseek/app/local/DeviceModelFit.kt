@@ -14,9 +14,14 @@ internal object DeviceModelFitEvaluator {
         val available = memoryInfo.availMem
         val abiSupported = Build.SUPPORTED_ABIS.any { it == "arm64-v8a" }
         if (!abiSupported) return DeviceModelFit("Не поддерживается", "Нужен Android arm64 (arm64-v8a).", false)
-        val enough = memoryInfo.totalMem >= entry.minimumMemoryBytes * 2 && available >= entry.minimumMemoryBytes / 3
+        val enough = memoryInfo.totalMem >= entry.minimumMemoryBytes && available >= entry.minimumMemoryBytes / 3
+        val workload = when {
+            entry.minimumMemoryBytes <= 2_000_000_000L -> "Низкая нагрузка"
+            entry.minimumMemoryBytes <= 4_000_000_000L -> "Средняя нагрузка"
+            else -> "Высокая нагрузка"
+        }
         return if (enough) {
-            DeviceModelFit("Средняя нагрузка · оценка", "${entry.memoryEstimate}; реальная скорость зависит от телефона и контекста.", false)
+            DeviceModelFit("$workload · оценка", "${entry.memoryEstimate}; реальная скорость зависит от телефона и контекста.", false)
         } else {
             DeviceModelFit("Высокая нагрузка · оценка", "Свободной памяти может не хватить. ${entry.memoryEstimate}; закройте тяжёлые приложения.", false)
         }

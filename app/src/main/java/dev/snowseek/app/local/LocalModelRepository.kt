@@ -137,7 +137,7 @@ internal class LocalModelRepository(context: Context) {
             }
             val connection = (URL(url).openConnection() as HttpURLConnection).apply {
                 connectTimeout = 30_000; readTimeout = 30_000; instanceFollowRedirects = true
-                setRequestProperty("User-Agent", "SnowSeek-Android/0.5.0")
+                setRequestProperty("User-Agent", "SnowSeek-Android/0.5.1")
                 if (offset > 0) setRequestProperty("Range", "bytes=$offset-")
             }
             try {
