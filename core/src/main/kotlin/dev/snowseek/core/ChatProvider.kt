@@ -48,6 +48,9 @@ data class ChatMessage(
     val attachments: List<ChatAttachment> = emptyList(),
     val citations: List<SearchCitation> = emptyList(),
     val instruction: ChatInstruction? = null,
+    // The server replaces pending IDs on ready; the visible message must keep its identity.
+    @kotlinx.serialization.Transient
+    val uiKey: String = id,
 )
 
 @Serializable

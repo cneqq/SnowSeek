@@ -391,7 +391,8 @@ class DeepSeekWebProvider(
 
     private fun replaceDraft(chatId: String, draftId: String, message: ChatMessage, title: String?) {
         state.update { list -> list.map { chat -> if (chat.id != chatId) chat else chat.copy(
-            messages = chat.messages.map { if (it.id == draftId || it.id == message.id || it.status == MessageStatus.GENERATING && it.role == MessageRole.ASSISTANT) message else it },
+            messages = chat.messages.map { if (it.id == draftId || it.id == message.id || it.status == MessageStatus.GENERATING && it.role == MessageRole.ASSISTANT)
+                message.copy(uiKey = it.uiKey) else it },
             title = title ?: chat.title, updatedAt = System.currentTimeMillis()) } }
     }
     override suspend fun stopGeneration(chatId: String) {

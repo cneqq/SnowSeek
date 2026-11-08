@@ -504,7 +504,7 @@ private fun MessageList(
         }
         onJumpHandled()
     }
-    LaunchedEffect(last?.id, last?.text?.length, last?.reasoning?.length, last?.status, followLatest, dragged) {
+    LaunchedEffect(last?.uiKey, last?.text?.length, last?.reasoning?.length, last?.status, followLatest, dragged) {
         if (followLatest && !dragged && chat.messages.isNotEmpty()) {
             // Scroll to a separate trailing item, so even a reply taller than the viewport ends visibly.
             val index = chat.messages.size
@@ -516,9 +516,9 @@ private fun MessageList(
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(start = 18.dp, top = 16.dp, end = 18.dp, bottom = 16.dp + composerInset),
             verticalArrangement = Arrangement.spacedBy(22.dp)) {
-            items(chat.messages, key = { it.id }) { message ->
-                var visible by remember(message.id) { mutableStateOf(!animations) }
-                LaunchedEffect(message.id) { visible = true }
+            items(chat.messages, key = { it.uiKey }) { message ->
+                var visible by remember(message.uiKey) { mutableStateOf(!animations) }
+                LaunchedEffect(message.uiKey) { visible = true }
                 AnimatedVisibility(visible = visible, enter = fadeIn(), exit = fadeOut()) {
                     Column {
                         MessageCard(message, onReasoningToggle = { followLatest = false },

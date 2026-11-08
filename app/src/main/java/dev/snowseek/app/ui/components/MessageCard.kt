@@ -73,8 +73,8 @@ fun MessageCard(
                         onLongClickLabel = w.text("Изменить сообщение", "Edit message"),
                     ) else Modifier)) {
                 Column(Modifier.padding(horizontal = 18.dp, vertical = 14.dp)) {
-                    var expanded by rememberSaveable(message.id, message.text) { mutableStateOf(false) }
-                    var overflows by remember(message.id, message.text) { mutableStateOf(false) }
+                    var expanded by rememberSaveable(message.uiKey, message.text) { mutableStateOf(false) }
+                    var overflows by remember(message.uiKey, message.text) { mutableStateOf(false) }
                     if (message.text.isNotBlank()) Text(message.text, style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onPrimaryContainer,
                         maxLines = if (expanded) Int.MAX_VALUE else 6,
@@ -107,15 +107,15 @@ fun MessageCard(
         } else {
             val generating = message.status == MessageStatus.GENERATING
             val reveal = animateStreaming && (generating || message.status == MessageStatus.COMPLETE)
-            val text = revealStream(message.id, message.text, generating, reveal)
-            val reasoning = revealStream(message.id, message.reasoning, generating, reveal)
+            val text = revealStream(message.uiKey, message.text, generating, reveal)
+            val reasoning = revealStream(message.uiKey, message.reasoning, generating, reveal)
             val revealing = text != message.text || reasoning != message.reasoning
             val revealCallback by rememberUpdatedState(onReveal)
             LaunchedEffect(text, reasoning) {
                 if (reveal && (generating || revealing)) revealCallback()
             }
             if (reasoning.isNotEmpty()) {
-                var expanded by rememberSaveable(message.id) {
+                var expanded by rememberSaveable(message.uiKey) {
                     mutableStateOf(message.status == MessageStatus.GENERATING)
                 }
                 Surface(shape = RoundedCornerShape(16.dp),
