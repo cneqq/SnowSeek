@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -59,57 +60,56 @@ internal fun LocalModelScreen(onBack: () -> Unit) {
 
     Scaffold(topBar = { TopAppBar(title = { Text(w.text("Локальная модель", "Local model")) }, navigationIcon = {
         IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, w.text("Назад", "Back")) }
-    }) }, bottomBar = {
+    }) }) { padding ->
         if (state.ready) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = state.prompt,
-                    onValueChange = model::prompt,
-                    modifier = Modifier.weight(1f),
-                    placeholder = { Text(w.text("Напишите вопрос…", "Ask a question…")) },
-                    maxLines = 4,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { model.send() }),
-                    shape = RoundedCornerShape(24.dp),
-                )
-                IconButton(onClick = model::send, enabled = !state.generating && !state.loading && state.prompt.isNotBlank()) {
-                    Icon(Icons.AutoMirrored.Outlined.Send, w.text("Отправить", "Send"))
-                }
-            }
-        }
-    }) { padding ->
-        if (state.ready) {
-            LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                item {
-                    Text(w.text("Пробный чат · Qwen3 0.6B", "Test chat · Qwen3 0.6B"), style = MaterialTheme.typography.titleMedium)
-                    Text(w.text("Ответы создаются на телефоне. Интернет для них не нужен.", "Replies are generated on your phone. No internet connection is needed."),
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(w.text("Модель может ошибаться. Поиск в интернете отключён.", "The model may make mistakes. Web search is unavailable."),
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    TextButton(onClick = { deleteConfirmation = true }) {
-                        Text(w.text("Удалить модель · $bytes", "Delete model · $bytes"), color = MaterialTheme.colorScheme.error)
-                    }
-                }
-                items(state.exchanges) { exchange ->
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.secondaryContainer,
-                            modifier = Modifier.align(Alignment.End)) {
-                            Text(exchange.question, Modifier.padding(horizontal = 14.dp, vertical = 10.dp))
-                        }
-                        Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            modifier = Modifier.fillMaxWidth()) {
-                            Text(exchange.answer.ifBlank { if (state.generating) w.text("Думает…", "Thinking…") else "" },
-                                Modifier.fillMaxWidth().padding(14.dp))
+            Column(Modifier.fillMaxSize().padding(padding).imePadding()) {
+                LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    item {
+                        Text(w.text("Пробный чат · Qwen3 0.6B", "Test chat · Qwen3 0.6B"), style = MaterialTheme.typography.titleMedium)
+                        Text(w.text("Ответы создаются на телефоне. Интернет для них не нужен.", "Replies are generated on your phone. No internet connection is needed."),
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(w.text("Модель может ошибаться. Поиск в интернете отключён.", "The model may make mistakes. Web search is unavailable."),
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        TextButton(onClick = { deleteConfirmation = true }) {
+                            Text(w.text("Удалить модель · $bytes", "Delete model · $bytes"), color = MaterialTheme.colorScheme.error)
                         }
                     }
+                    items(state.exchanges) { exchange ->
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.secondaryContainer,
+                                modifier = Modifier.align(Alignment.End)) {
+                                Text(exchange.question, Modifier.padding(horizontal = 14.dp, vertical = 10.dp))
+                            }
+                            Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                modifier = Modifier.fillMaxWidth()) {
+                                Text(exchange.answer.ifBlank { if (state.generating) w.text("Думает…", "Thinking…") else "" },
+                                    Modifier.fillMaxWidth().padding(14.dp))
+                            }
+                        }
+                    }
+                    if (state.loading) item { Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        Text(w.text("Загрузка модели в память…", "Loading model into memory…"))
+                    } }
+                    state.error?.let { error -> item { Text(error, color = MaterialTheme.colorScheme.error) } }
                 }
-                if (state.loading) item { Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                    Text(w.text("Загрузка модели в память…", "Loading model into memory…"))
-                } }
-                state.error?.let { error -> item { Text(error, color = MaterialTheme.colorScheme.error) } }
+                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = state.prompt,
+                        onValueChange = model::prompt,
+                        modifier = Modifier.weight(1f),
+                        placeholder = { Text(w.text("Напишите вопрос…", "Ask a question…")) },
+                        maxLines = 4,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                        keyboardActions = KeyboardActions(onSend = { model.send() }),
+                        shape = RoundedCornerShape(24.dp),
+                    )
+                    IconButton(onClick = model::send, enabled = !state.generating && !state.loading && state.prompt.isNotBlank()) {
+                        Icon(Icons.AutoMirrored.Outlined.Send, w.text("Отправить", "Send"))
+                    }
+                }
             }
         } else {
             Column(Modifier.fillMaxSize().padding(padding).padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
