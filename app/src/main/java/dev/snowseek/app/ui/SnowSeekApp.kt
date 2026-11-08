@@ -10,9 +10,6 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.PickVisualMediaRequest
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -479,13 +476,15 @@ private fun MessageList(
     composerInset: Dp, hideInstructions: Boolean, attachmentPhotos: Map<String, Uri>, wallpaperEnabled: Boolean,
 ) {
     val words = LocalWords.current
+    // Index 0 is always the end of the conversation, independent of measured reply heights.
     val listState = rememberLazyListState()
+    val newestFirst = remember(chat.messages) { chat.messages.asReversed() }
     val last = chat.messages.lastOrNull()
     val lastAssistant = chat.messages.lastOrNull { it.role == dev.snowseek.core.MessageRole.ASSISTANT }
     val dragged by listState.interactionSource.collectIsDraggedAsState()
     var followLatest by remember(chat.id) { mutableStateOf(true) }
     val atBottom by remember { derivedStateOf {
-        !listState.canScrollForward
+        !listState.canScrollBackward
     } }
     LaunchedEffect(dragged) {
         if (dragged) followLatest = false
@@ -493,80 +492,78 @@ private fun MessageList(
     }
     LaunchedEffect(atBottom) { if (atBottom && !dragged) followLatest = true }
     LaunchedEffect(chat.id) {
-        if (chat.messages.isNotEmpty()) listState.scrollToItem(chat.messages.size)
+        followLatest = true
+        listState.scrollToItem(0)
     }
     LaunchedEffect(jumpToRequest) {
         if (jumpToRequest == null) return@LaunchedEffect
         val index = chat.messages.indexOfFirst { it.id == jumpToRequest }
         if (index >= 0) {
             followLatest = false
-            listState.scrollToItem(index)
+            listState.scrollToItem(chat.messages.size - index)
         }
         onJumpHandled()
     }
     LaunchedEffect(last?.uiKey, last?.text?.length, last?.reasoning?.length, last?.status, followLatest, dragged) {
         if (followLatest && !dragged && chat.messages.isNotEmpty()) {
-            // Scroll to a separate trailing item, so even a reply taller than the viewport ends visibly.
-            val index = chat.messages.size
             // A token must not restart a slow animation and fight the next token's scroll.
-            listState.scrollToItem(index)
+            listState.scrollToItem(0)
         }
     }
     Box(modifier.fillMaxWidth()) {
-        LazyColumn(state = listState, modifier = Modifier.fillMaxSize(),
+        LazyColumn(state = listState, reverseLayout = true, modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(start = 18.dp, top = 16.dp, end = 18.dp, bottom = 16.dp + composerInset),
             verticalArrangement = Arrangement.spacedBy(22.dp)) {
-            items(chat.messages, key = { it.uiKey }) { message ->
-                var visible by remember(message.uiKey) { mutableStateOf(!animations) }
-                LaunchedEffect(message.uiKey) { visible = true }
-                AnimatedVisibility(visible = visible, enter = fadeIn(), exit = fadeOut()) {
-                    Column {
-                        MessageCard(message, onReasoningToggle = { followLatest = false },
-                            wallpaperEnabled = wallpaperEnabled,
-                            showInstruction = !hideInstructions,
-                            attachmentPhotos = attachmentPhotos,
-                            animateStreaming = animations,
-                            onReveal = {
-                                if (message.id == last?.id && followLatest && !dragged) {
-                                    listState.requestScrollToItem(chat.messages.size)
-                                }
-                            },
-                            onEdit = if (message.role == dev.snowseek.core.MessageRole.USER) ({ onEdit(message.id) }) else null,
-                            onContinue = if (canAct && message.id == lastAssistant?.id && message.continuable &&
-                                message.id.toLongOrNull() != null) ({ onContinue(message.id) }) else null,
-                            onRegenerate = if (canAct && message.role == dev.snowseek.core.MessageRole.ASSISTANT &&
-                                message.regenerable && message.id.toLongOrNull() != null) ({ onRegenerate(message.id) }) else null)
-                        chat.versions[message.id]?.let { version ->
-                            Row(Modifier.align(Alignment.End), verticalAlignment = Alignment.CenterVertically) {
-                                fun changeVersion(index: Int) {
-                                    val target = version.ids.getOrNull(index) ?: return
-                                    val position = chat.messages.indexOfFirst { it.id == message.id }
-                                    followLatest = false
-                                    onVersion(message.id, target)
-                                    if (position >= 0) listState.requestScrollToItem(position)
-                                }
-                                IconButton(enabled = canAct && canSwitchVersion && version.index > 0,
-                                    onClick = { changeVersion(version.index - 1) }) {
-                                    Icon(Icons.AutoMirrored.Outlined.KeyboardArrowLeft, words.text("Предыдущая версия", "Previous version"))
-                                }
-                                Text("${version.index + 1}/${version.ids.size}", style = MaterialTheme.typography.labelMedium)
-                                IconButton(enabled = canAct && canSwitchVersion && version.index < version.ids.lastIndex,
-                                    onClick = { changeVersion(version.index + 1) }) {
-                                    Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, words.text("Следующая версия", "Next version"))
-                                }
+            item(key = "conversation-bottom") { Spacer(Modifier.height(1.dp)) }
+            items(newestFirst, key = { it.uiKey }) { message ->
+                Column {
+                    MessageCard(message, onReasoningToggle = { followLatest = false },
+                        wallpaperEnabled = wallpaperEnabled,
+                        showInstruction = !hideInstructions,
+                        attachmentPhotos = attachmentPhotos,
+                        animateStreaming = animations,
+                        onReveal = {
+                            if (message.id == last?.id && followLatest && !dragged) {
+                                listState.requestScrollToItem(0)
+                            }
+                        },
+                        onEdit = if (message.role == dev.snowseek.core.MessageRole.USER) ({ onEdit(message.id) }) else null,
+                        onContinue = if (canAct && message.id == lastAssistant?.id && message.continuable &&
+                            message.id.toLongOrNull() != null) ({ onContinue(message.id) }) else null,
+                        onRegenerate = if (canAct && message.role == dev.snowseek.core.MessageRole.ASSISTANT &&
+                            message.regenerable && message.id.toLongOrNull() != null) ({ onRegenerate(message.id) }) else null)
+                    chat.versions[message.id]?.let { version ->
+                        Row(Modifier.align(Alignment.End), verticalAlignment = Alignment.CenterVertically) {
+                            fun changeVersion(index: Int) {
+                                val target = version.ids.getOrNull(index) ?: return
+                                val position = chat.messages.indexOfFirst { it.id == message.id }
+                                followLatest = false
+                                onVersion(message.id, target)
+                                if (position >= 0) listState.requestScrollToItem(chat.messages.size - position)
+                            }
+                            IconButton(enabled = canAct && canSwitchVersion && version.index > 0,
+                                onClick = { changeVersion(version.index - 1) }) {
+                                Icon(Icons.AutoMirrored.Outlined.KeyboardArrowLeft, words.text("Предыдущая версия", "Previous version"))
+                            }
+                            Text("${version.index + 1}/${version.ids.size}", style = MaterialTheme.typography.labelMedium)
+                            IconButton(enabled = canAct && canSwitchVersion && version.index < version.ids.lastIndex,
+                                onClick = { changeVersion(version.index + 1) }) {
+                                Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, words.text("Следующая версия", "Next version"))
                             }
                         }
                     }
                 }
             }
-            item(key = "conversation-bottom") { Spacer(Modifier.height(1.dp)) }
         }
         if (!atBottom) {
             val scope = rememberCoroutineScope()
             val w = LocalWords.current
             SmallFloatingActionButton(onClick = {
-                followLatest = true
-                scope.launch { listState.scrollToItem(chat.messages.size) }
+                scope.launch {
+                    followLatest = false
+                    listState.animateScrollToItem(0)
+                    followLatest = true
+                }
             },
                 modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = composerInset).padding(12.dp),
                 containerColor = MaterialTheme.colorScheme.primaryContainer) {
