@@ -440,6 +440,7 @@ class DeepSeekWebProvider(
                 name = metadata.text("file_name") ?: metadata.text("name") ?: previous.name,
                 size = metadata.text("file_size")?.toLongOrNull() ?: previous.size,
                 status = metadata.text("status") ?: previous.status,
+                    isImage = metadata.text("is_image")?.toBooleanStrictOrNull() ?: previous.isImage,
                 previewUrl = if (metadata.containsKey("signed_path") || metadata.containsKey("audit_result")) {
                     attachmentPreviewUrl(metadata)
                 } else previous.previewUrl,
@@ -471,7 +472,8 @@ class DeepSeekWebProvider(
                 while (true) {
                     when (metadata.text("status")) {
                         "SUCCESS" -> return@withTimeoutOrNull ChatAttachment(id, metadata.text("file_name") ?: file.name,
-                            metadata.text("file_size")?.toLongOrNull() ?: file.size)
+                            metadata.text("file_size")?.toLongOrNull() ?: file.size,
+                            isImage = metadata.text("is_image") == "true" || file.contentType.startsWith("image/"))
                         "PENDING", "PROCESSING", "PARSING" -> Unit
                         else -> throw DeepSeekFailure("DeepSeek не смог обработать файл. / DeepSeek could not process this file.")
                     }

@@ -18,6 +18,13 @@ private val Context.snowSeekSettings by preferencesDataStore(name = "snowseek_se
 
 enum class ThemeMode { SYSTEM, LIGHT, DARK, CHARCOAL, BLACK }
 enum class FontMode { SYSTEM, STANDARD, APPLE_LIKE, ANTHROPIC_LIKE }
+enum class PhotoCacheLimit(val bytes: Long) {
+    MB_100(100L * 1024 * 1024),
+    MB_500(500L * 1024 * 1024),
+    GB_1(1024L * 1024 * 1024),
+    GB_2(2L * 1024 * 1024 * 1024),
+    UNLIMITED(Long.MAX_VALUE),
+}
 
 data class GlassSettings(
     val enabled: Boolean = false,
@@ -45,6 +52,7 @@ data class AppSettings(
     val welcomeComplete: Boolean = false,
     val customInstructions: List<ChatInstruction> = emptyList(),
     val glass: GlassSettings = GlassSettings(),
+    val photoCacheLimit: PhotoCacheLimit = PhotoCacheLimit.MB_500,
 )
 
 class SettingsStore(context: Context) : AppliedInstructionStore {
@@ -59,6 +67,8 @@ class SettingsStore(context: Context) : AppliedInstructionStore {
             textScale = validScale(values[TEXT_SCALE] ?: 1f),
             animations = values[ANIMATIONS] ?: true,
             hideInstructions = values[HIDE_INSTRUCTIONS] ?: false,
+            photoCacheLimit = PhotoCacheLimit.entries.firstOrNull { it.name == values[PHOTO_CACHE_LIMIT] }
+                ?: PhotoCacheLimit.MB_500,
             welcomeComplete = values[WELCOME] ?: false,
             customInstructions = values[INSTRUCTIONS]?.let { Json.decodeFromString<List<ChatInstruction>>(it) }
                 .orEmpty().filter { it.isValid() && it.id.startsWith("custom.") }.distinctBy { it.id },
@@ -77,6 +87,7 @@ class SettingsStore(context: Context) : AppliedInstructionStore {
     suspend fun updateTextScale(value: Float) { store.edit { it[TEXT_SCALE] = validScale(value) } }
     suspend fun updateAnimations(value: Boolean) { store.edit { it[ANIMATIONS] = value } }
     suspend fun updateHideInstructions(value: Boolean) { store.edit { it[HIDE_INSTRUCTIONS] = value } }
+    suspend fun updatePhotoCacheLimit(value: PhotoCacheLimit) { store.edit { it[PHOTO_CACHE_LIMIT] = value.name } }
     suspend fun updateGlass(value: GlassSettings) {
         val glass = value.normalized()
         store.edit {
@@ -119,6 +130,7 @@ class SettingsStore(context: Context) : AppliedInstructionStore {
         val TEXT_SCALE = floatPreferencesKey("text_scale")
         val ANIMATIONS = booleanPreferencesKey("animations")
         val HIDE_INSTRUCTIONS = booleanPreferencesKey("hide_instructions")
+        val PHOTO_CACHE_LIMIT = stringPreferencesKey("photo_cache_limit")
         val WELCOME = booleanPreferencesKey("welcome_complete")
         val GLASS_ENABLED = booleanPreferencesKey("composer_glass_enabled")
         val GLASS_BLUR = floatPreferencesKey("composer_glass_blur")

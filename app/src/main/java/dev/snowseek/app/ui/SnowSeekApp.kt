@@ -4,6 +4,7 @@ package dev.snowseek.app.ui
 
 import android.content.Intent
 import android.net.Uri
+import android.text.format.Formatter
 import androidx.core.net.toUri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -65,9 +66,11 @@ import dev.snowseek.app.auth.OfficialWebActivity
 import dev.snowseek.app.settings.AppSettings
 import dev.snowseek.app.settings.FontMode
 import dev.snowseek.app.settings.GlassSettings
+import dev.snowseek.app.settings.PhotoCacheLimit
 import dev.snowseek.app.settings.ThemeMode
 import dev.snowseek.app.ui.components.MessageCard
 import dev.snowseek.app.ui.components.PhotoAttachment
+import dev.snowseek.app.ui.components.LocalPhotoCache
 import dev.snowseek.app.ui.components.ChatComposerLayout
 import dev.snowseek.app.ui.components.ComposerSurface
 import dev.snowseek.app.ui.components.AppearanceChoice
@@ -103,7 +106,10 @@ fun SnowSeekApp(model: SnowSeekViewModel) {
         context.startActivity(Intent(context, OfficialWebActivity::class.java).putExtra("language", settings.language))
     }
     SnowSeekTheme(themedSettings) {
-        CompositionLocalProvider(LocalWords provides words) {
+        CompositionLocalProvider(
+            LocalWords provides words,
+            LocalPhotoCache provides model.photoCache.takeIf { ui.authenticated && !ui.sessionChanging },
+        ) {
             Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                 if (!settingsReady) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
@@ -510,10 +516,18 @@ private fun MessageList(
         if (!atBottom) {
             val scope = rememberCoroutineScope()
             val w = LocalWords.current
-            SmallFloatingActionButton(onClick = { followLatest = true; scope.launch { listState.scrollToItem(chat.messages.size) } },
+            val nextRequest = ((listState.firstVisibleItemIndex + 1) until chat.messages.size).firstOrNull {
+                chat.messages[it].role == dev.snowseek.core.MessageRole.USER
+            }
+            SmallFloatingActionButton(onClick = {
+                followLatest = nextRequest == null
+                scope.launch { listState.scrollToItem(nextRequest ?: chat.messages.size) }
+            },
                 modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = composerInset).padding(12.dp),
                 containerColor = MaterialTheme.colorScheme.primaryContainer) {
-                Icon(Icons.Outlined.ArrowDownward, w.text("К последнему сообщению", "Jump to latest message"))
+                Icon(Icons.Outlined.ArrowDownward,
+                    if (nextRequest != null) w.text("К следующему запросу", "Jump to next request")
+                    else w.text("К последнему сообщению", "Jump to latest message"))
             }
         }
     }
@@ -576,7 +590,7 @@ private fun Composer(ui: ChatUiState, model: SnowSeekViewModel, glass: GlassSett
                                 val photo = ui.attachmentPhotos[attachment.id]
                                 if (photo != null) {
                                     Row(Modifier.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                                        PhotoAttachment(photo, attachment.name, Modifier.size(64.dp))
+                                        PhotoAttachment(attachment.id, photo, attachment.name, Modifier.size(64.dp))
                                         IconButton(onClick = { model.removeAttachment(attachment.id) },
                                             enabled = !ui.generating && !ui.uploading) {
                                             Icon(Icons.Outlined.Close, w.text("Удалить фото", "Remove photo"), Modifier.size(18.dp))
@@ -709,6 +723,10 @@ private fun SettingsScreen(
             GlassEditor(settings.glass, closePage, model::glass)
             return
         }
+        AppearanceSection.CACHE -> {
+            PhotoCacheSettings(settings.photoCacheLimit, model, closePage)
+            return
+        }
         AppearanceSection.OVERVIEW -> Unit
     }
     var logoutConfirmation by rememberSaveable { mutableStateOf(false) }
@@ -750,6 +768,11 @@ private fun SettingsScreen(
                         RadioButton(selected = settings.language == code, onClick = { model.language(code) })
                         TextButton(onClick = { model.language(code) }) { Text(name) }
                     }
+                }
+            }
+            SettingGroup(w.text("ХРАНИЛИЩЕ", "STORAGE")) {
+                AppearanceLink(w.text("Кеш фотографий", "Photo cache"), w.cacheLimitName(settings.photoCacheLimit)) {
+                    page = AppearanceSection.CACHE
                 }
             }
             SettingGroup(w.text("АККАУНТ", "ACCOUNT")) {
@@ -802,7 +825,52 @@ private fun SettingsScreen(
     }
 }
 
-private enum class AppearanceSection { OVERVIEW, THEME, FONT, GLASS }
+private enum class AppearanceSection { OVERVIEW, THEME, FONT, GLASS, CACHE }
+
+@Composable
+private fun PhotoCacheSettings(limit: PhotoCacheLimit, model: SnowSeekViewModel, onBack: () -> Unit) {
+    val w = LocalWords.current
+    val context = LocalContext.current
+    val size by model.photoCache.size.collectAsStateWithLifecycle()
+    var help by rememberSaveable { mutableStateOf(false) }
+    AppearancePage(w.text("Кеш фотографий", "Photo cache"), onBack) {
+        Text(w.text("Занято", "Used") + " · " + Formatter.formatFileSize(context, size),
+            Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.bodyMedium)
+        Row(Modifier.fillMaxWidth().padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(w.text("Лимит кеша", "Cache limit"), Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+            IconButton(onClick = { help = true }) {
+                Icon(Icons.Outlined.HelpOutline, w.text("Что такое лимит кеша", "About the cache limit"))
+            }
+        }
+        Column(Modifier.selectableGroup()) {
+            PhotoCacheLimit.entries.forEach { option ->
+                AppearanceChoice(w.cacheLimitName(option), option == limit, { model.photoCacheLimit(option) })
+            }
+        }
+        TextButton(onClick = model::clearPhotoCache, enabled = size > 0) {
+            Text(w.text("Очистить кеш фото", "Clear photo cache"))
+        }
+    }
+    if (help) AlertDialog(
+        onDismissRequest = { help = false },
+        title = { Text(w.text("Лимит кеша", "Cache limit")) },
+        text = {
+            Text(w.text(
+                "Лимит задаёт, сколько места фотографии могут занимать на телефоне. Когда кеш заполняется, первыми удаляются копии фото, которые дольше всего не открывали. «Без ограничений» позволяет кешу расти, пока есть свободное место. Фото в чатах DeepSeek сохраняются.",
+                "The limit sets how much space cached photos can use on this device. When the cache fills up, the least recently opened copies are removed first. Unlimited lets the cache grow while space is available. Photos in DeepSeek chats remain available.",
+            ))
+        },
+        confirmButton = { TextButton(onClick = { help = false }) { Text(w.text("Понятно", "Got it")) } },
+    )
+}
+
+private fun Words.cacheLimitName(limit: PhotoCacheLimit): String = when (limit) {
+    PhotoCacheLimit.MB_100 -> text("100 МБ", "100 MB")
+    PhotoCacheLimit.MB_500 -> text("500 МБ", "500 MB")
+    PhotoCacheLimit.GB_1 -> text("1 ГБ", "1 GB")
+    PhotoCacheLimit.GB_2 -> text("2 ГБ", "2 GB")
+    PhotoCacheLimit.UNLIMITED -> text("Без ограничений", "Unlimited")
+}
 
 private fun Words.themeName(mode: ThemeMode): String = when (mode) {
     ThemeMode.SYSTEM -> text("Как в системе", "System default")

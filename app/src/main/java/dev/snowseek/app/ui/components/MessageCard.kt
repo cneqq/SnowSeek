@@ -87,8 +87,8 @@ fun MessageCard(
                     message.attachments.forEach { attachment ->
                         key(attachment.id) {
                             val photo = attachmentPhotos[attachment.id]
-                            if (photo != null || attachment.previewUrl != null) {
-                                PhotoAttachment(photo, attachment.name, Modifier.padding(top = 8.dp).size(width = 120.dp, height = 90.dp),
+                            if (photo != null || attachment.isImage || attachment.previewUrl != null) {
+                                PhotoAttachment(attachment.id, photo, attachment.name, Modifier.padding(top = 8.dp).size(width = 120.dp, height = 90.dp),
                                     previewUrl = attachment.previewUrl)
                             } else Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)) {

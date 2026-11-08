@@ -15,10 +15,12 @@ import androidx.lifecycle.viewModelScope
 import dev.snowseek.app.auth.WebSession
 import dev.snowseek.app.auth.DeepSeekCredentials
 import dev.snowseek.app.data.DeepSeekHttpTransport
+import dev.snowseek.app.data.PhotoCache
 import dev.snowseek.app.settings.AppSettings
 import dev.snowseek.app.settings.FontMode
 import dev.snowseek.app.settings.GlassSettings
 import dev.snowseek.app.settings.SettingsStore
+import dev.snowseek.app.settings.PhotoCacheLimit
 import dev.snowseek.app.settings.ThemeMode
 import dev.snowseek.core.ChatOptions
 import dev.snowseek.core.ChatSession
@@ -65,6 +67,7 @@ data class ChatUiState(
 class SnowSeekViewModel(application: Application) : AndroidViewModel(application) {
     private val preferences = SettingsStore(application)
     private val credentials = DeepSeekCredentials.get(application)
+    internal val photoCache = PhotoCache(File(application.cacheDir, "attachment-photos")) { credentials.changes.value }
     private val transport = DeepSeekHttpTransport(application)
     private val web = DeepSeekWebProvider(transport, preferences)
     private val provider: ChatProvider = web
@@ -79,7 +82,13 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
         emit(lastSettings)
         delay(1500)
         true
-    }.onEach { lastSettings = it; mutableSettingsReady.value = true }
+    }.onEach {
+        if (!mutableSettingsReady.value || lastSettings.photoCacheLimit != it.photoCacheLimit) {
+            photoCache.setLimit(it.photoCacheLimit)
+        }
+        lastSettings = it
+        mutableSettingsReady.value = true
+    }
         .stateIn(viewModelScope, SharingStarted.Eagerly, AppSettings())
     private var generation: Job? = null
     private var stopping = false
@@ -99,6 +108,7 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
         bindProvider()
         initialize()
         viewModelScope.launch {
+            if (credentials.token() == null) photoCache.clear()
             credentials.changes.collect { revision ->
                 if (revision == observedRevision) return@collect
                 mutableUi.update { it.copy(authenticated = false, sessionChanging = true,
@@ -115,6 +125,7 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
                 initialization?.join()
                 historyLoad?.join()
                 web.clear()
+                photoCache.clear()
                 observedRevision = credentials.changes.value
                 mutableUi.value = ChatUiState(authenticated = credentials.token() != null,
                     sessionChanging = loggingOut, signingOut = loggingOut)
@@ -194,6 +205,7 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
             return
         }
         mutableUi.update { it.copy(uploading = true, error = false, errorMessage = null) }
+        val cacheTicket = photoCache.ticket()
         upload = viewModelScope.launch {
             try {
                 for (uri in uris) {
@@ -201,8 +213,12 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
                     try {
                         val prepared = prepareAttachment(uri, temporary)
                         val ready = web.uploadAttachment(prepared, current.deepThink)
+                        val isPhoto = fromPhotoPicker || prepared.contentType.startsWith("image/")
+                        if (isPhoto) withContext(Dispatchers.IO) {
+                            photoCache.write(cacheTicket, ready.id, "original", prepared.size) { temporary.inputStream() }
+                        }
                         mutableUi.update { state ->
-                            val photos = if (fromPhotoPicker || prepared.contentType.startsWith("image/")) {
+                            val photos = if (isPhoto) {
                                 (state.attachmentPhotos - ready.id + (ready.id to uri))
                                     .entries.toList().takeLast(40).associate { it.key to it.value }
                             } else state.attachmentPhotos
@@ -461,6 +477,8 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
     fun language(value: String) = save { preferences.updateLanguage(value) }
     fun textScale(value: Float) = save { preferences.updateTextScale(value) }
     fun animations(value: Boolean) = save { preferences.updateAnimations(value) }
+    fun photoCacheLimit(value: PhotoCacheLimit) = save { preferences.updatePhotoCacheLimit(value) }
+    fun clearPhotoCache() = save { photoCache.clear() }
     fun hideInstructions(value: Boolean) = save {
         preferences.updateHideInstructions(value)
         if (value) mutableUi.update { it.copy(selectedInstruction = null) }

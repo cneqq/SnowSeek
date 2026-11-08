@@ -24,10 +24,12 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.snowseek.app.ui.LocalWords
+import dev.snowseek.app.data.PhotoCache
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.URI
 import java.nio.ByteBuffer
@@ -35,10 +37,10 @@ import kotlin.coroutines.coroutineContext
 import kotlin.math.roundToInt
 
 @Composable
-internal fun PhotoAttachment(uri: Uri?, name: String, modifier: Modifier = Modifier, previewUrl: String? = null) {
+internal fun PhotoAttachment(id: String, uri: Uri?, name: String, modifier: Modifier = Modifier, previewUrl: String? = null) {
     val w = LocalWords.current
     var open by remember(uri, previewUrl) { mutableStateOf(false) }
-    val thumbnail = attachmentImage(uri, previewUrl, 256, "t")
+    val thumbnail = attachmentImage(id, uri, previewUrl, 256, "t")
     val bitmap = thumbnail.bitmap
     Surface(
         modifier.clip(RoundedCornerShape(12.dp)).clickable(
@@ -55,7 +57,7 @@ internal fun PhotoAttachment(uri: Uri?, name: String, modifier: Modifier = Modif
         }
     }
     if (open) {
-        val preview = attachmentImage(uri, previewUrl, 1600, "p")
+        val preview = attachmentImage(id, uri, previewUrl, 1600, "p")
         AlertDialog(
             onDismissRequest = { open = false },
             title = { Text(name, maxLines = 2, overflow = TextOverflow.Ellipsis) },
@@ -76,20 +78,44 @@ internal fun PhotoAttachment(uri: Uri?, name: String, modifier: Modifier = Modif
 
 private data class AttachmentImage(val bitmap: Bitmap? = null, val loading: Boolean = true)
 
+internal val LocalPhotoCache = staticCompositionLocalOf<PhotoCache?> { null }
+
 @Composable
-private fun attachmentImage(uri: Uri?, previewUrl: String?, maxSide: Int, variant: String): AttachmentImage {
+private fun attachmentImage(id: String, uri: Uri?, previewUrl: String?, maxSide: Int, variant: String): AttachmentImage {
     val resolver = LocalContext.current.contentResolver
-    val image by produceState(AttachmentImage(), uri, previewUrl, maxSide, resolver) {
+    val cache = LocalPhotoCache.current
+    val image by produceState(AttachmentImage(), id, uri, previewUrl, maxSide, resolver, cache) {
         value = AttachmentImage()
+        val ticket = cache?.ticket()
         val bitmap = withContext(Dispatchers.IO) {
-            val local = uri?.let { decodeOrNull { decodeAttachment(resolver, it, maxSide) } }
-            local ?: previewUrl?.let { url ->
-                decodeOrNull { downloadPreview(url, variant)?.let { decodePreview(it, maxSide) } }
+            fun cached(quality: String) = ticket?.let {
+                cache.read(it, id, quality) { file -> decodeOrNull { decodeCachedPhoto(file, maxSide) } }
             }
+            val local = cached("original") ?: cached(variant)
+                ?: if (variant == "t") cached("p") else null
+            local ?: uri?.let { decodeOrNull { decodeAttachment(resolver, it, maxSide) } }
+            ?: previewUrl?.let { url ->
+                decodeOrNull {
+                    val bytes = downloadPreview(url, variant) ?: return@decodeOrNull null
+                    val decoded = decodePreview(bytes, maxSide)
+                    if (decoded != null && ticket != null) {
+                        coroutineContext.ensureActive()
+                        cache.write(ticket, id, variant, bytes.size.toLong()) { bytes.inputStream() }
+                    }
+                    decoded
+                }
+            } ?: if (variant == "p") cached("t") else null
         }
         value = AttachmentImage(bitmap, loading = false)
     }
     return image
+}
+
+private fun decodeCachedPhoto(file: File, maxSide: Int): Bitmap? {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        return decodeSampled(ImageDecoder.createSource(file), maxSide)
+    }
+    return decodeSampled(maxSide) { BitmapFactory.decodeFile(file.path, it) }
 }
 
 private inline fun decodeOrNull(block: () -> Bitmap?): Bitmap? = try {

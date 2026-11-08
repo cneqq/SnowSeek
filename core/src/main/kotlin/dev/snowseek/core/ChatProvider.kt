@@ -20,6 +20,7 @@ data class ChatAttachment(
     val size: Long = 0,
     val status: String = "SUCCESS",
     @kotlinx.serialization.Transient val previewUrl: String? = null,
+    val isImage: Boolean = false,
 )
 
 /** A selected document is read only when the user explicitly attaches it. */
