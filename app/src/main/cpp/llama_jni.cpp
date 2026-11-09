@@ -184,15 +184,15 @@ void logToAndroid(enum ggml_log_level level, const char *message, void *) {
 }
 
 void decodeBatch(ModelSession &session, llama_batch_ext *batch, const std::vector<llama_token> &tokens,
-                 int32_t start, int32_t count) {
+                 int32_t tokenOffset, int32_t positionStart, int32_t count) {
     llama_batch_ext_clear(batch);
     for (int32_t i = 0; i < count; ++i) {
-        const llama_token token = tokens[static_cast<size_t>(start + i)];
+        const llama_token token = tokens[static_cast<size_t>(tokenOffset + i)];
         const int32_t index = llama_batch_ext_add_token(batch, 0, token);
         if (index == -1) throw std::runtime_error("Пакет GGUF переполнен при обработке токенов");
         if (index == -2) throw std::runtime_error("Модель вернула токен вне своего словаря. Попробуйте другую модель или другую квантовку GGUF.");
         if (index < 0) throw std::runtime_error("Не удалось добавить токен GGUF: ошибка " + std::to_string(index));
-        const llama_pos position = start + i;
+        const llama_pos position = positionStart + i;
         if (!llama_batch_ext_set_pos(batch, index, &position)) {
             throw std::runtime_error("Модель отклонила позицию токена");
         }
@@ -343,7 +343,7 @@ Java_dev_snowseek_app_local_LlamaCppEngine_nativeGenerate(JNIEnv *env, jobject, 
         try {
             for (int32_t start = 0; start < tokenCount; start += kBatchTokens) {
                 if (session->cancelled.load(std::memory_order_relaxed)) break;
-                decodeBatch(*session, batch, promptTokens, start, std::min(kBatchTokens, tokenCount - start));
+                decodeBatch(*session, batch, promptTokens, start, start, std::min(kBatchTokens, tokenCount - start));
             }
 
             std::string pendingUtf8;
@@ -369,7 +369,7 @@ Java_dev_snowseek_app_local_LlamaCppEngine_nativeGenerate(JNIEnv *env, jobject, 
 
                 const std::vector<llama_token> next{token};
                 if (session->cancelled.load(std::memory_order_relaxed)) break;
-                decodeBatch(*session, batch, next, tokenCount + index, 1);
+                decodeBatch(*session, batch, next, 0, tokenCount + index, 1);
             }
             llama_batch_ext_free(batch);
             llama_sampler_free(sampler);

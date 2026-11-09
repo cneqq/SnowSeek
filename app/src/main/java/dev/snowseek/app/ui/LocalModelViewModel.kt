@@ -129,7 +129,8 @@ internal class LocalModelViewModel(application: Application) : AndroidViewModel(
         repository.select(chat.modelId)
         mutableState.update { it.copy(installed = repository.installed(), selectedId = chat.modelId,
             history = repository.chats(), chatModelId = chat.modelId, activeChatId = chat.id,
-            chatTitle = chat.title, exchanges = chat.turns.map { LocalModelExchange(it.question, it.answer) },
+            chatTitle = chat.title, exchanges = chat.turns.filter { it.answer.isNotBlank() }
+                .map { LocalModelExchange(it.question, it.answer) },
             prompt = "", error = null) }
     }
 
@@ -198,7 +199,12 @@ internal class LocalModelViewModel(application: Application) : AndroidViewModel(
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Exception) {
-                mutableState.update { it.copy(error = failure.message ?: "Не удалось получить локальный ответ") }
+                mutableState.update { value ->
+                    val last = value.exchanges.lastOrNull()
+                    val exchanges = if (last?.question == question) value.exchanges.dropLast(1) else value.exchanges
+                    value.copy(exchanges = exchanges, error = failure.message ?: "Не удалось получить локальный ответ")
+                }
+                saveCurrentChat()
             } finally {
                 mutableState.update { it.copy(generating = false, loading = false) }
             }
