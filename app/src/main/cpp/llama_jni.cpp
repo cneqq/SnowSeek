@@ -156,8 +156,11 @@ void decodeBatch(ModelSession &session, llama_batch_ext *batch, const std::vecto
                  int32_t start, int32_t count) {
     llama_batch_ext_clear(batch);
     for (int32_t i = 0; i < count; ++i) {
-        const int32_t index = llama_batch_ext_add_token(batch, 0, tokens[static_cast<size_t>(start + i)]);
-        if (index < 0) throw std::runtime_error("Не удалось сформировать пакет токенов GGUF");
+        const llama_token token = tokens[static_cast<size_t>(start + i)];
+        const int32_t index = llama_batch_ext_add_token(batch, 0, token);
+        if (index == -1) throw std::runtime_error("Пакет GGUF переполнен при обработке токенов");
+        if (index == -2) throw std::runtime_error("Модель вернула токен вне своего словаря. Попробуйте другую модель или другую квантовку GGUF.");
+        if (index < 0) throw std::runtime_error("Не удалось добавить токен GGUF: ошибка " + std::to_string(index));
         const llama_pos position = start + i;
         if (!llama_batch_ext_set_pos(batch, index, &position)) {
             throw std::runtime_error("Модель отклонила позицию токена");
@@ -315,6 +318,9 @@ Java_dev_snowseek_app_local_LlamaCppEngine_nativeGenerate(JNIEnv *env, jobject, 
             std::string pendingUtf8;
             for (int32_t index = 0; index < kMaxGeneratedTokens && !session->cancelled.load(std::memory_order_relaxed); ++index) {
                 const llama_token token = llama_sampler_sample(sampler, session->context, -1);
+                if (token < 0 || token >= llama_vocab_n_tokens(vocab)) {
+                    throw std::runtime_error("Модель вернула токен вне своего словаря. Попробуйте другую модель или другую квантовку GGUF.");
+                }
                 if (llama_vocab_is_eog(vocab, token)) break;
                 char tokenBytes[256];
                 int32_t byteCount = llama_token_to_piece(vocab, token, tokenBytes, sizeof(tokenBytes), 0, false);

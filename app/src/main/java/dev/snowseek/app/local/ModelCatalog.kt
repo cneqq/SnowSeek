@@ -41,7 +41,7 @@ private fun gguf(
     fileName = file, downloadUrl = "https://huggingface.co/$repo/resolve/$revision/$file?download=true",
     revision = revision, sha256 = sha256, publisher = publisher, baseModel = baseModel,
     license = license, licenseUrl = licenseUrl,
-    tasks = tasks, languages = "Многоязычная", minimumMemoryBytes = memory,
+    tasks = tasks, languages = "Русский, английский", minimumMemoryBytes = memory,
     memoryEstimate = "примерно ${memory / 1_000_000_000.0} ГБ оперативной памяти",
 )
 
@@ -62,7 +62,7 @@ internal object ModelCatalog {
             license = "Apache-2.0",
             licenseUrl = "https://www.apache.org/licenses/LICENSE-2.0",
             tasks = "Короткие ответы, простые вопросы, черновики",
-            languages = "Многоязычная",
+            languages = "Русский, английский",
             minimumMemoryBytes = 1_500_000_000L,
             memoryEstimate = "примерно 1,5 ГБ и больше",
         ),
@@ -81,7 +81,7 @@ internal object ModelCatalog {
             license = "Apache-2.0",
             licenseUrl = "https://www.apache.org/licenses/LICENSE-2.0",
             tasks = "Объяснения, перевод, черновики",
-            languages = "Многоязычная",
+            languages = "Русский, английский",
             minimumMemoryBytes = 2_500_000_000L,
             memoryEstimate = "примерно 2,5 ГБ оперативной памяти",
         ),
@@ -100,7 +100,7 @@ internal object ModelCatalog {
             license = "Apache-2.0",
             licenseUrl = "https://www.apache.org/licenses/LICENSE-2.0",
             tasks = "Написание, объяснение и исправление кода",
-            languages = "Многоязычная",
+            languages = "Русский, английский",
             minimumMemoryBytes = 4_000_000_000L,
             memoryEstimate = "примерно 4 ГБ оперативной памяти",
         ),
@@ -119,7 +119,7 @@ internal object ModelCatalog {
             license = "Apache-2.0",
             licenseUrl = "https://www.apache.org/licenses/LICENSE-2.0",
             tasks = "Сложные вопросы, развёрнутые объяснения, рассуждения",
-            languages = "Многоязычная",
+            languages = "Русский, английский",
             minimumMemoryBytes = 5_000_000_000L,
             memoryEstimate = "примерно 5 ГБ оперативной памяти",
         ),
@@ -225,5 +225,42 @@ internal object ModelCatalog {
             "88790198b8ab4f251b5b462756adc0265b3f6b9d9d87708d847645d9568bf168", "OLMo 2 7B",
             ModelTaskFolder.REASONING, "Объяснения и задачи с несколькими шагами; английский", 7_000_000_000L,
             publisher = "Allen Institute for AI · bartowski"),
-    ).associateBy(ModelCatalogEntry::id)
+    ).filterNot { entry ->
+        entry.id in setOf(
+            "smollm2-135m", "smollm2-360m", "smollm2-17b", "phi35-mini",
+            "mathstral-7b", "llama32-1b", "mistral-7b-instruct", "starcoder2-3b",
+            "granite33-2b", "tinyllama-11b", "falcon3-1b", "falcon3-3b", "olmo2-7b",
+        )
+    }.plus(listOf(
+        gguf(
+            id = "vikhr-qwen25-05b", name = "Vikhr Qwen2.5 0.5B · Q4_K_M",
+            repo = "Vikhrmodels/Vikhr-Qwen-2.5-0.5B-instruct-GGUF",
+            revision = "a2bc2797ec4dd39dd99f20a92f7a05a71c8122bf",
+            file = "Vikhr-Qwen-2.5-0.5B-instruct-Q4_K_M.gguf", size = 397_543_680L,
+            sha256 = "8f45f00da2bcd70205461639e978db7c8245e205c8604cfe2ab7f5430506bf32",
+            baseModel = "Vikhr · Qwen2.5 0.5B", folder = ModelTaskFolder.QUICK,
+            tasks = "Короткие ответы, простые вопросы, общение на русском", memory = 1_300_000_000L,
+            publisher = "Vikhrmodels",
+        ),
+        gguf(
+            id = "vikhr-qwen25-15b", name = "Vikhr Qwen2.5 1.5B · Q4_K_M",
+            repo = "Vikhrmodels/Vikhr-Qwen-2.5-1.5B-Instruct-GGUF",
+            revision = "f3d0a36f09a910b9f50ae1bf388d147aca0b75d4",
+            file = "Vikhr-Qwen-2.5-1.5b-Instruct-Q4_K_M.gguf", size = 985_700_992L,
+            sha256 = "d82b16244a33dbbde4742e38e42b2b3d74dd883f4b8ff4ae53eca29aabf60662",
+            baseModel = "Vikhr · Qwen2.5 1.5B", folder = ModelTaskFolder.CHAT,
+            tasks = "Общение, объяснения, перевод и работа с текстом", memory = 2_500_000_000L,
+            publisher = "Vikhrmodels",
+        ),
+        gguf(
+            id = "vikhr-7b", name = "Vikhr 7B Instruct · Q4_K_M",
+            repo = "oblivious/Vikhr-7B-instruct-GGUF",
+            revision = "1aa2089a0a6b1d2389f2df0565aa9480ecd2194e",
+            file = "Vikhr-7B-instruct-Q4_K_M.gguf", size = 4_413_985_472L,
+            sha256 = "2485e393deb8651810f4bd7e4d200c6abd4e45a3f39ad812c220300ecea31d13",
+            baseModel = "Vikhr 7B", folder = ModelTaskFolder.GENERAL,
+            tasks = "Развёрнутые ответы, объяснения и диалог на русском", memory = 7_000_000_000L,
+            publisher = "Vikhrmodels",
+        ),
+    )).associateBy(ModelCatalogEntry::id)
 }

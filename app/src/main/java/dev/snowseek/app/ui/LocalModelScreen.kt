@@ -242,6 +242,7 @@ private fun ModelTaskFolder.title(w: Words): String = when (this) {
 private fun InstalledModelCard(model: InstalledModel, selected: Boolean, onOpen: () -> Unit, onDelete: () -> Unit) {
     val context = LocalContext.current
     val w = LocalWords.current
+    val fit = DeviceModelFitEvaluator.evaluate(context, null, model.fileSizeBytes, model.format)
     Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -254,8 +255,10 @@ private fun InstalledModelCard(model: InstalledModel, selected: Boolean, onOpen:
                 }
                 IconButton(onClick = onDelete) { Icon(Icons.Outlined.DeleteOutline, w.text("Удалить", "Delete")) }
             }
+            Text("${w.text("Нагрузка", "Workload")}: ${fit.title} · ${fit.explanation}",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(if (selected) w.text("Выбрана", "Selected") else model.memoryEstimate ?: w.text("Оценка примерная", "Rough estimate"),
+                Text(if (selected) w.text("Выбрана", "Selected") else w.text("Импортирована", "Imported"),
                     Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Button(onClick = onOpen) { Text(w.text("Новый чат", "New chat")) }
