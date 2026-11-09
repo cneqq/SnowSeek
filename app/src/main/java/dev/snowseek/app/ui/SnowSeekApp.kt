@@ -83,6 +83,8 @@ import dev.snowseek.app.ui.theme.SnowSeekTheme
 import dev.snowseek.app.ui.theme.fontFamily
 import dev.snowseek.core.ChatSession
 import dev.chrisbanes.haze.HazeState
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.coroutines.launch
@@ -481,6 +483,7 @@ private fun MessageList(
     val newestFirst = remember(chat.messages) { chat.messages.asReversed() }
     val last = chat.messages.lastOrNull()
     val lastAssistant = chat.messages.lastOrNull { it.role == dev.snowseek.core.MessageRole.ASSISTANT }
+    val scrollRequests = remember { Channel<Unit>(Channel.CONFLATED) }
     val dragged by listState.interactionSource.collectIsDraggedAsState()
     var followLatest by remember(chat.id) { mutableStateOf(true) }
     val latestTextVisible by remember(listState, last?.uiKey) {
@@ -500,6 +503,7 @@ private fun MessageList(
     val atBottom by remember { derivedStateOf {
         !listState.canScrollBackward
     } }
+    val shouldFollowLatest by rememberUpdatedState(followLatest && latestTextVisible && !dragged)
     LaunchedEffect(dragged) {
         if (dragged) followLatest = false
         else if (latestTextVisible) followLatest = true
@@ -523,11 +527,18 @@ private fun MessageList(
         }
         onJumpHandled()
     }
+    LaunchedEffect(listState, scrollRequests) {
+        for (ignored in scrollRequests) {
+            delay(48)
+            if (shouldFollowLatest) {
+                listState.animateScrollToItem(0)
+            }
+        }
+    }
     LaunchedEffect(last?.uiKey, last?.text?.length, last?.reasoning?.length, last?.status,
         followLatest, latestTextVisible, dragged) {
         if (followLatest && latestTextVisible && !dragged && chat.messages.isNotEmpty()) {
-            // A token must not restart a slow animation and fight the next token's scroll.
-            listState.scrollToItem(0)
+            scrollRequests.trySend(Unit)
         }
     }
     Box(modifier.fillMaxWidth()) {
@@ -544,7 +555,7 @@ private fun MessageList(
                         animateStreaming = animations,
                         onReveal = {
                             if (message.id == last?.id && followLatest && latestTextVisible && !dragged) {
-                                listState.requestScrollToItem(0)
+                                scrollRequests.trySend(Unit)
                             }
                         },
                         onEdit = if (message.role == dev.snowseek.core.MessageRole.USER) ({ onEdit(message.id) }) else null,
