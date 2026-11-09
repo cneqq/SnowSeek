@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.os.StatFs
 import java.io.File
+import java.io.IOException
 import java.io.RandomAccessFile
 import java.net.HttpURLConnection
 import java.net.URL
@@ -96,7 +97,7 @@ internal class LocalModelRepository(context: Context) {
         metadata.edit().putString("selected", id).apply()
     }
 
-    suspend fun download(entry: ModelCatalogEntry, onProgress: (Long) -> Unit, onVerifying: () -> Unit) = withContext(Dispatchers.IO) {
+    suspend fun download(entry: ModelCatalogEntry, onProgress: suspend (Long) -> Unit, onVerifying: suspend () -> Unit) = withContext(Dispatchers.IO) {
         require(ModelCatalog.entries[entry.id] == entry) { "Модель отсутствует в каталоге SnowSeek" }
         val destination = File(root, entry.fileName)
         val partial = File(root, "${entry.fileName}.part")
@@ -172,7 +173,7 @@ internal class LocalModelRepository(context: Context) {
         if (index >= 0 && cursor.moveToFirst()) cursor.getString(index) else null
     } ?: uri.lastPathSegment?.substringAfterLast('/') ?: "Модель"
 
-    private suspend fun downloadTo(url: String, expectedSize: Long, partial: File, onProgress: (Long) -> Unit) {
+    private suspend fun downloadTo(url: String, expectedSize: Long, partial: File, onProgress: suspend (Long) -> Unit) {
         var failures = 0
         while (partial.length() < expectedSize) {
             currentCoroutineContext().ensureActive()
@@ -187,6 +188,9 @@ internal class LocalModelRepository(context: Context) {
             }
             try {
                 val response = connection.responseCode
+                if (response == 408 || response == 429 || response >= 500) {
+                    throw IOException("Сервер временно недоступен: HTTP $response")
+                }
                 check(response in 200..299) { "Сервер вернул HTTP $response" }
                 val append = offset > 0 && response == HttpURLConnection.HTTP_PARTIAL
                 if (append) {

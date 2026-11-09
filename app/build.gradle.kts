@@ -72,6 +72,7 @@ dependencies {
     implementation("dev.chrisbanes.haze:haze-blur:2.1.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
+    implementation("androidx.work:work-runtime-ktx:2.11.2")
     implementation("androidx.datastore:datastore-preferences:1.3.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.12.0")

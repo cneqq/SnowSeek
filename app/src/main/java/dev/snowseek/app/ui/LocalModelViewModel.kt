@@ -11,12 +11,21 @@ import dev.snowseek.app.local.LocalChatMessage
 import dev.snowseek.app.local.LocalInferenceEngine
 import dev.snowseek.app.local.LocalModelFormat
 import dev.snowseek.app.local.LocalModelRepository
+import dev.snowseek.app.local.LocalModelDownloadWorker
 import dev.snowseek.app.local.ModelCatalog
 import dev.snowseek.app.local.ModelCatalogEntry
 import dev.snowseek.app.local.SavedLocalChat
 import dev.snowseek.app.local.SavedLocalTurn
 import java.io.File
 import java.util.UUID
+import androidx.work.Constraints
+import androidx.work.ExistingWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
+import androidx.work.workDataOf
+import androidx.lifecycle.Observer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -47,6 +56,7 @@ internal data class LocalModelUiState(
 
 internal class LocalModelViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = LocalModelRepository(application)
+    private val workManager = WorkManager.getInstance(application)
     private val mutableState = MutableStateFlow(
         LocalModelUiState(
             catalog = repository.catalog(),
@@ -61,34 +71,76 @@ internal class LocalModelViewModel(application: Application) : AndroidViewModel(
     private var inferenceJob: Job? = null
     private var engine: LocalInferenceEngine? = null
     private var engineModelId: String? = null
+    private val downloadWorkLiveData = workManager.getWorkInfosByTagLiveData(LocalModelDownloadWorker.TAG)
+    private val downloadWorkObserver = Observer<List<WorkInfo>>(::syncDownloadState)
 
-    fun prompt(value: String) = mutableState.update { it.copy(prompt = value.take(4_000), error = null) }
+    init {
+        downloadWorkLiveData.observeForever(downloadWorkObserver)
+    }
 
-    fun download(entry: ModelCatalogEntry) {
-        if (downloadJob?.isActive == true || mutableState.value.installed.any { it.id == entry.id }) return
-        downloadJob = viewModelScope.launch {
-            mutableState.update { it.copy(downloadedBytes = 0, downloadingId = entry.id, verifying = false, error = null) }
-            try {
-                repository.download(entry, { count -> mutableState.update { it.copy(downloadedBytes = count) } },
-                    { mutableState.update { it.copy(verifying = true) } })
-                refreshLibrary()
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (failure: Exception) {
-                mutableState.update { it.copy(error = failure.message ?: "Не удалось скачать модель") }
-            } finally {
-                mutableState.update { it.copy(downloadingId = null, verifying = false) }
+    private fun syncDownloadState(infos: List<WorkInfo>?) {
+        infos ?: return
+        fun modelId(info: WorkInfo) = info.tags.firstOrNull { it.startsWith("${LocalModelDownloadWorker.TAG}:") }
+            ?.substringAfter(':')
+        val active = infos.firstOrNull { !it.state.isFinished }
+        if (active != null) {
+            val modelId = modelId(active) ?: return
+            mutableState.update {
+                it.copy(
+                    downloadedBytes = active.progress.getLong(LocalModelDownloadWorker.KEY_DOWNLOADED_BYTES, 0L),
+                    downloadingId = modelId,
+                    verifying = active.progress.getBoolean(LocalModelDownloadWorker.KEY_VERIFYING, false),
+                    error = null,
+                )
+            }
+        } else {
+            val currentId = mutableState.value.downloadingId
+            if (currentId != null && currentId != "import") {
+                val finished = infos.filter { modelId(it) == currentId }.maxByOrNull { it.generation }
+                if (finished != null) {
+                    val completed = finished.state == WorkInfo.State.SUCCEEDED
+                    mutableState.update {
+                        it.copy(
+                            installed = if (completed) repository.installed() else it.installed,
+                            downloadedBytes = if (completed) 0 else it.downloadedBytes,
+                            downloadingId = null,
+                            verifying = false,
+                            error = if (finished.state == WorkInfo.State.FAILED) {
+                                finished.outputData.getString(LocalModelDownloadWorker.KEY_ERROR) ?: "Не удалось скачать модель"
+                            } else it.error,
+                        )
+                    }
+                }
             }
         }
     }
 
+    fun prompt(value: String) = mutableState.update { it.copy(prompt = value.take(4_000), error = null) }
+
+    fun download(entry: ModelCatalogEntry) {
+        if (downloadJob?.isActive == true || mutableState.value.downloadingId != null ||
+            mutableState.value.installed.any { it.id == entry.id }) return
+        val request = OneTimeWorkRequestBuilder<LocalModelDownloadWorker>()
+            .setInputData(workDataOf(LocalModelDownloadWorker.KEY_MODEL_ID to entry.id))
+            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+            .addTag(LocalModelDownloadWorker.TAG)
+            .addTag(LocalModelDownloadWorker.modelTag(entry.id))
+            .build()
+        mutableState.update { it.copy(downloadedBytes = 0, downloadingId = entry.id, verifying = false, error = null) }
+        workManager.enqueueUniqueWork(
+            LocalModelDownloadWorker.uniqueWorkName(entry.id), ExistingWorkPolicy.KEEP, request,
+        )
+    }
+
     fun cancelDownload() {
-        downloadJob?.cancel()
+        val activeId = mutableState.value.downloadingId
+        if (activeId == "import") downloadJob?.cancel()
+        else if (activeId != null) workManager.cancelUniqueWork(LocalModelDownloadWorker.uniqueWorkName(activeId))
         mutableState.update { it.copy(downloadingId = null, verifying = false) }
     }
 
     fun import(uri: Uri) {
-        if (downloadJob?.isActive == true) return
+        if (downloadJob?.isActive == true || mutableState.value.downloadingId != null) return
         downloadJob = viewModelScope.launch {
             mutableState.update { it.copy(downloadedBytes = 0, downloadingId = "import", verifying = false, error = null) }
             try {
@@ -265,6 +317,7 @@ internal class LocalModelViewModel(application: Application) : AndroidViewModel(
     }
 
     override fun onCleared() {
+        downloadWorkLiveData.removeObserver(downloadWorkObserver)
         downloadJob?.cancel()
         unload()
         super.onCleared()
