@@ -483,14 +483,33 @@ private fun MessageList(
     val lastAssistant = chat.messages.lastOrNull { it.role == dev.snowseek.core.MessageRole.ASSISTANT }
     val dragged by listState.interactionSource.collectIsDraggedAsState()
     var followLatest by remember(chat.id) { mutableStateOf(true) }
+    val latestTextVisible by remember(listState, last?.uiKey) {
+        derivedStateOf {
+            val latestKey = last?.uiKey
+            val layout = listState.layoutInfo
+            val latestItem = latestKey?.let { key ->
+                layout.visibleItemsInfo.firstOrNull { it.key == key }
+            }
+            val itemBottom = latestItem?.let { it.offset + it.size }
+            itemBottom != null && itemBottom in layout.viewportStartOffset..layout.viewportEndOffset
+        }
+    }
+    val hasVisibleItems by remember(listState) {
+        derivedStateOf { listState.layoutInfo.visibleItemsInfo.isNotEmpty() }
+    }
     val atBottom by remember { derivedStateOf {
         !listState.canScrollBackward
     } }
     LaunchedEffect(dragged) {
         if (dragged) followLatest = false
-        else if (atBottom) followLatest = true
+        else if (latestTextVisible) followLatest = true
     }
-    LaunchedEffect(atBottom) { if (atBottom && !dragged) followLatest = true }
+    LaunchedEffect(latestTextVisible, hasVisibleItems, dragged) {
+        if (hasVisibleItems && !dragged) {
+            if (latestTextVisible) followLatest = true
+            else if (!atBottom) followLatest = false
+        }
+    }
     LaunchedEffect(chat.id) {
         followLatest = true
         listState.scrollToItem(0)
@@ -504,8 +523,9 @@ private fun MessageList(
         }
         onJumpHandled()
     }
-    LaunchedEffect(last?.uiKey, last?.text?.length, last?.reasoning?.length, last?.status, followLatest, dragged) {
-        if (followLatest && !dragged && chat.messages.isNotEmpty()) {
+    LaunchedEffect(last?.uiKey, last?.text?.length, last?.reasoning?.length, last?.status,
+        followLatest, latestTextVisible, dragged) {
+        if (followLatest && latestTextVisible && !dragged && chat.messages.isNotEmpty()) {
             // A token must not restart a slow animation and fight the next token's scroll.
             listState.scrollToItem(0)
         }
@@ -523,7 +543,7 @@ private fun MessageList(
                         attachmentPhotos = attachmentPhotos,
                         animateStreaming = animations,
                         onReveal = {
-                            if (message.id == last?.id && followLatest && !dragged) {
+                            if (message.id == last?.id && followLatest && latestTextVisible && !dragged) {
                                 listState.requestScrollToItem(0)
                             }
                         },
