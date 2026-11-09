@@ -271,7 +271,7 @@ private fun InstalledModelCard(model: InstalledModel, selected: Boolean, onOpen:
                 },
                     Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Button(onClick = onOpen, enabled = !retiredForRussian) { Text(w.text("Новый чат", "New chat")) }
+                Button(onClick = onOpen) { Text(w.text("Новый чат", "New chat")) }
             }
         }
     }

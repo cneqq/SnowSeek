@@ -163,10 +163,6 @@ internal class LocalModelViewModel(application: Application) : AndroidViewModel(
         val question = current.prompt.trim()
         val model = current.installed.firstOrNull { it.id == current.chatModelId }
         if (model == null || question.isEmpty() || current.generating || current.loading) return
-        if (ModelCatalog.isRetiredForRussian(model.id)) {
-            mutableState.update { it.copy(error = "Эта модель плохо отвечает по-русски. Удалите её и выберите Vikhr или Qwen из каталога.") }
-            return
-        }
         mutableState.update { it.copy(prompt = "", generating = true, error = null,
             exchanges = (it.exchanges + LocalModelExchange(question, "")).takeLast(20)) }
         mutableState.update { value ->
