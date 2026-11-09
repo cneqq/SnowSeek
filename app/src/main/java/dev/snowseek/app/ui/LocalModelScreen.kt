@@ -66,6 +66,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.snowseek.app.local.DeviceModelFitEvaluator
 import dev.snowseek.app.local.InstalledModel
+import dev.snowseek.app.local.ModelCatalog
 import dev.snowseek.app.local.ModelCatalogEntry
 import dev.snowseek.app.local.ModelTaskFolder
 import dev.snowseek.app.local.SavedLocalChat
@@ -243,6 +244,7 @@ private fun InstalledModelCard(model: InstalledModel, selected: Boolean, onOpen:
     val context = LocalContext.current
     val w = LocalWords.current
     val fit = DeviceModelFitEvaluator.evaluate(context, null, model.fileSizeBytes, model.format)
+    val retiredForRussian = ModelCatalog.isRetiredForRussian(model.id)
     Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -257,11 +259,19 @@ private fun InstalledModelCard(model: InstalledModel, selected: Boolean, onOpen:
             }
             Text("${w.text("Нагрузка", "Workload")}: ${fit.title} · ${fit.explanation}",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (retiredForRussian) Text(
+                w.text("Слабая поддержка русского. Удалите эту модель и выберите Vikhr или Qwen из каталога.",
+                    "Russian support is weak. Delete this model and choose Vikhr or Qwen from the catalogue."),
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(if (selected) w.text("Выбрана", "Selected") else w.text("Импортирована", "Imported"),
+                Text(when {
+                    retiredForRussian -> w.text("Не рекомендуется", "Not recommended")
+                    selected -> w.text("Выбрана", "Selected")
+                    else -> w.text("Импортирована", "Imported")
+                },
                     Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Button(onClick = onOpen) { Text(w.text("Новый чат", "New chat")) }
+                Button(onClick = onOpen, enabled = !retiredForRussian) { Text(w.text("Новый чат", "New chat")) }
             }
         }
     }

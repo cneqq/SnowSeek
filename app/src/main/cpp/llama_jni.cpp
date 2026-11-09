@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -142,6 +143,36 @@ std::shared_ptr<ModelSession> getSession(JNIEnv *env, jlong handle) {
 
 bool shouldAbort(void *data) {
     return static_cast<ModelSession *>(data)->cancelled.load(std::memory_order_relaxed);
+}
+
+llama_token sampleToken(llama_sampler *sampler, ModelSession &session, const llama_vocab *vocab) {
+    const llama_token sampled = llama_sampler_sample(sampler, session.context, -1);
+    const int32_t vocabSize = llama_vocab_n_tokens(vocab);
+    if (sampled >= 0 && sampled < vocabSize) return sampled;
+
+    const float *logits = llama_get_logits_ith(session.context, -1);
+    if (logits == nullptr) {
+        throw std::runtime_error("GGUF не вернул логиты для следующего токена. Попробуйте другую модель.");
+    }
+
+    llama_token best = LLAMA_TOKEN_NULL;
+    float bestLogit = -INFINITY;
+    for (llama_token candidate = 0; candidate < vocabSize; ++candidate) {
+        const float logit = logits[candidate];
+        if (std::isfinite(logit) && logit > bestLogit) {
+            best = candidate;
+            bestLogit = logit;
+        }
+    }
+    if (best == LLAMA_TOKEN_NULL) {
+        throw std::runtime_error("GGUF не вернул допустимые логиты для следующего токена. Попробуйте другую модель.");
+    }
+
+    __android_log_print(ANDROID_LOG_WARN, kTag,
+        "Sampler returned token %d outside vocabulary 0..%d; using highest-logit token %d",
+        sampled, vocabSize - 1, best);
+    llama_sampler_accept(sampler, best);
+    return best;
 }
 
 void logToAndroid(enum ggml_log_level level, const char *message, void *) {
@@ -317,10 +348,7 @@ Java_dev_snowseek_app_local_LlamaCppEngine_nativeGenerate(JNIEnv *env, jobject, 
 
             std::string pendingUtf8;
             for (int32_t index = 0; index < kMaxGeneratedTokens && !session->cancelled.load(std::memory_order_relaxed); ++index) {
-                const llama_token token = llama_sampler_sample(sampler, session->context, -1);
-                if (token < 0 || token >= llama_vocab_n_tokens(vocab)) {
-                    throw std::runtime_error("Модель вернула токен вне своего словаря. Попробуйте другую модель или другую квантовку GGUF.");
-                }
+                const llama_token token = sampleToken(sampler, *session, vocab);
                 if (llama_vocab_is_eog(vocab, token)) break;
                 char tokenBytes[256];
                 int32_t byteCount = llama_token_to_piece(vocab, token, tokenBytes, sizeof(tokenBytes), 0, false);

@@ -11,6 +11,7 @@ import dev.snowseek.app.local.LocalChatMessage
 import dev.snowseek.app.local.LocalInferenceEngine
 import dev.snowseek.app.local.LocalModelFormat
 import dev.snowseek.app.local.LocalModelRepository
+import dev.snowseek.app.local.ModelCatalog
 import dev.snowseek.app.local.ModelCatalogEntry
 import dev.snowseek.app.local.SavedLocalChat
 import dev.snowseek.app.local.SavedLocalTurn
@@ -161,6 +162,10 @@ internal class LocalModelViewModel(application: Application) : AndroidViewModel(
         val question = current.prompt.trim()
         val model = current.installed.firstOrNull { it.id == current.chatModelId }
         if (model == null || question.isEmpty() || current.generating || current.loading) return
+        if (ModelCatalog.isRetiredForRussian(model.id)) {
+            mutableState.update { it.copy(error = "Эта модель плохо отвечает по-русски. Удалите её и выберите Vikhr или Qwen из каталога.") }
+            return
+        }
         mutableState.update { it.copy(prompt = "", generating = true, error = null,
             exchanges = (it.exchanges + LocalModelExchange(question, "")).takeLast(20)) }
         mutableState.update { value ->

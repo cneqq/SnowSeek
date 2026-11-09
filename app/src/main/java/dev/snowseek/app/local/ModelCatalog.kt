@@ -46,6 +46,14 @@ private fun gguf(
 )
 
 internal object ModelCatalog {
+    private val retiredForRussian = setOf(
+        "smollm2-135m", "smollm2-360m", "smollm2-17b", "phi35-mini",
+        "mathstral-7b", "llama32-1b", "mistral-7b-instruct", "starcoder2-3b",
+        "granite33-2b", "tinyllama-11b", "falcon3-1b", "falcon3-3b", "olmo2-7b",
+    )
+
+    fun isRetiredForRussian(modelId: String): Boolean = modelId in retiredForRussian
+
     val entries = listOf(
         ModelCatalogEntry(
             id = "qwen3-06b-litert-int4",
@@ -225,13 +233,7 @@ internal object ModelCatalog {
             "88790198b8ab4f251b5b462756adc0265b3f6b9d9d87708d847645d9568bf168", "OLMo 2 7B",
             ModelTaskFolder.REASONING, "Объяснения и задачи с несколькими шагами; английский", 7_000_000_000L,
             publisher = "Allen Institute for AI · bartowski"),
-    ).filterNot { entry ->
-        entry.id in setOf(
-            "smollm2-135m", "smollm2-360m", "smollm2-17b", "phi35-mini",
-            "mathstral-7b", "llama32-1b", "mistral-7b-instruct", "starcoder2-3b",
-            "granite33-2b", "tinyllama-11b", "falcon3-1b", "falcon3-3b", "olmo2-7b",
-        )
-    }.plus(listOf(
+    ).filterNot { entry -> retiredForRussian.contains(entry.id) }.plus(listOf(
         gguf(
             id = "vikhr-qwen25-05b", name = "Vikhr Qwen2.5 0.5B · Q4_K_M",
             repo = "Vikhrmodels/Vikhr-Qwen-2.5-0.5B-instruct-GGUF",
