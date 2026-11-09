@@ -2,6 +2,7 @@ package dev.snowseek.app.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -49,10 +50,16 @@ internal fun ChatHistoryRow(
     title: String,
     selected: Boolean,
     pinned: Boolean,
+    archived: Boolean,
+    selectionMode: Boolean,
+    checked: Boolean,
     enabled: Boolean,
     onSelect: () -> Unit,
+    onStartSelection: () -> Unit,
+    onToggleSelection: () -> Unit,
     onPin: () -> Unit,
     onRename: () -> Unit,
+    onArchive: () -> Unit,
     onDelete: () -> Unit,
 ) {
     val w = LocalWords.current
@@ -61,13 +68,20 @@ internal fun ChatHistoryRow(
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
             .background(if (selected) colors.surfaceContainerHigh else Color.Transparent)
-            .clickable(onClick = onSelect).padding(start = 12.dp),
+            .combinedClickable(onClick = onSelect, onLongClick = onStartSelection).padding(start = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (selectionMode) {
+            Checkbox(checked = checked, onCheckedChange = { onToggleSelection() }, enabled = enabled,
+                modifier = Modifier.padding(end = 4.dp))
+        } else if (pinned) {
+            Icon(Icons.Outlined.PushPin, w.text("Закреплённый чат", "Pinned chat"),
+                Modifier.padding(end = 8.dp).size(15.dp), tint = colors.onSurfaceVariant)
+        }
         Text(title, Modifier.weight(1f).padding(vertical = 10.dp),
             style = MaterialTheme.typography.bodyMedium, maxLines = 2,
             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-        Box {
+        if (!selectionMode) Box {
             IconButton(onClick = { actions = true }, enabled = enabled) {
                 Icon(Icons.Outlined.MoreHoriz, w.text("Действия с чатом", "Chat actions"),
                     Modifier.size(20.dp), tint = colors.onSurfaceVariant)
@@ -85,6 +99,11 @@ internal fun ChatHistoryRow(
                     text = { Text(if (pinned) w.text("Открепить", "Unpin") else w.text("Закрепить", "Pin")) },
                     leadingIcon = { Icon(Icons.Outlined.PushPin, null) },
                     onClick = { actions = false; onPin() },
+                )
+                DropdownMenuItem(
+                    text = { Text(if (archived) w.text("Вернуть из архива", "Restore from archive") else w.text("В архив", "Archive")) },
+                    leadingIcon = { Icon(if (archived) Icons.Outlined.Unarchive else Icons.Outlined.Archive, null) },
+                    onClick = { actions = false; onArchive() },
                 )
                 DropdownMenuItem(
                     text = { Text(w.text("Удалить чат", "Delete chat")) },

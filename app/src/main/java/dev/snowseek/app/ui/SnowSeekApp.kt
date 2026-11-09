@@ -194,15 +194,20 @@ fun BrandMark(size: Int = 40) {
 @Composable
 private fun ChatScreen(ui: ChatUiState, settings: AppSettings, model: SnowSeekViewModel, onSettings: () -> Unit) {
     val w = LocalWords.current
+    val context = LocalContext.current
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val keyboard = LocalSoftwareKeyboardController.current
     val keyboardOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     var chatQuery by rememberSaveable { mutableStateOf("") }
+    var showArchived by rememberSaveable { mutableStateOf(false) }
+    var selectionMode by rememberSaveable { mutableStateOf(false) }
     val query = chatQuery.trim()
-    val visibleChats = remember(ui.chats, query, w) {
-        if (query.isEmpty()) ui.chats else ui.chats.filter { chatTitle(it, w).contains(query, ignoreCase = true) }
+    val visibleChats = remember(ui.chats, ui.archivedChatIds, query, showArchived, w) {
+        ui.chats.filter { (it.id in ui.archivedChatIds) == showArchived }
+            .let { chats -> if (query.isEmpty()) chats else chats.filter { chatTitle(it, w).contains(query, ignoreCase = true) } }
     }
+    LaunchedEffect(showArchived) { model.clearChatSelection(); selectionMode = false }
     val today by produceState(java.time.LocalDate.now()) {
         while (true) {
             value = java.time.LocalDate.now()
@@ -210,7 +215,7 @@ private fun ChatScreen(ui: ChatUiState, settings: AppSettings, model: SnowSeekVi
         }
     }
     val groups = remember(visibleChats, today) { groupChats(visibleChats, today, java.time.ZoneId.systemDefault()) }
-    var deleteId by rememberSaveable { mutableStateOf<String?>(null) }
+    var deleteIds by remember { mutableStateOf<Set<String>?>(null) }
     var renameId by rememberSaveable { mutableStateOf<String?>(null) }
     var renameTitle by rememberSaveable { mutableStateOf("") }
     val current = ui.chats.firstOrNull { it.id == ui.selectedId }
@@ -247,6 +252,39 @@ private fun ChatScreen(ui: ChatUiState, settings: AppSettings, model: SnowSeekVi
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
             )
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = !showArchived, onClick = { showArchived = false },
+                    label = { Text(w.text("Чаты", "Chats")) }, leadingIcon = if (!showArchived) ({ Icon(Icons.Outlined.ChatBubbleOutline, null, Modifier.size(16.dp)) }) else null)
+                FilterChip(selected = showArchived, onClick = { showArchived = true },
+                    label = { Text(w.text("Архив", "Archive")) }, leadingIcon = if (showArchived) ({ Icon(Icons.Outlined.Archive, null, Modifier.size(16.dp)) }) else null)
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = {
+                    if (selectionMode) { model.clearChatSelection(); selectionMode = false }
+                    else selectionMode = true
+                }, enabled = visibleChats.isNotEmpty()) {
+                    Text(if (selectionMode) w.text("Отмена", "Cancel") else w.text("Выбрать", "Select"))
+                }
+            }
+            if (selectionMode && ui.selectedChatIds.isNotEmpty()) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(w.text("Выбрано: ${ui.selectedChatIds.size}", "Selected: ${ui.selectedChatIds.size}"),
+                        Modifier.weight(1f), style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    IconButton(enabled = !ui.loading, onClick = {
+                        model.archiveChats(ui.selectedChatIds, !showArchived)
+                        selectionMode = false
+                    }) {
+                        Icon(if (showArchived) Icons.Outlined.Unarchive else Icons.Outlined.Archive,
+                            if (showArchived) w.text("Вернуть из архива", "Restore from archive") else w.text("В архив", "Archive selected"))
+                    }
+                    IconButton(enabled = !ui.loading, onClick = { deleteIds = ui.selectedChatIds }) {
+                        Icon(Icons.Outlined.DeleteOutline, w.text("Удалить выбранные чаты", "Delete selected chats"),
+                            tint = MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
             LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 12.dp)) {
                 ChatAge.entries.forEach { age ->
                     val chats = groups[age].orEmpty()
@@ -258,11 +296,22 @@ private fun ChatScreen(ui: ChatUiState, settings: AppSettings, model: SnowSeekVi
                         items(chats, key = { it.id }) { chat ->
                             ChatHistoryRow(
                                 title = chatTitle(chat, w), selected = chat.id == ui.selectedId, pinned = chat.pinned,
+                                archived = chat.id in ui.archivedChatIds,
+                                selectionMode = selectionMode, checked = chat.id in ui.selectedChatIds,
                                 enabled = !ui.generating && !ui.loading && !ui.uploading,
-                                onSelect = { keyboard?.hide(); model.select(chat.id); scope.launch { drawer.close() } },
+                                onSelect = {
+                                    if (selectionMode) model.toggleChatSelection(chat.id)
+                                    else { keyboard?.hide(); model.select(chat.id); scope.launch { drawer.close() } }
+                                },
+                                onStartSelection = {
+                                    if (!selectionMode) selectionMode = true
+                                    if (chat.id !in ui.selectedChatIds) model.toggleChatSelection(chat.id)
+                                },
+                                onToggleSelection = { model.toggleChatSelection(chat.id) },
                                 onPin = { model.pinChat(chat.id, !chat.pinned) },
                                 onRename = { renameTitle = chat.title; renameId = chat.id },
-                                onDelete = { deleteId = chat.id },
+                                onArchive = { model.archiveChats(setOf(chat.id), chat.id !in ui.archivedChatIds) },
+                                onDelete = { deleteIds = setOf(chat.id) },
                             )
                         }
                     }
@@ -274,8 +323,9 @@ private fun ChatScreen(ui: ChatUiState, settings: AppSettings, model: SnowSeekVi
                             Text(w.text("Повторить загрузку чатов", "Retry loading chats"))
                         }
                         else -> Text(
-                            if (query.isEmpty()) w.text("В аккаунте пока нет чатов", "Your account has no chats yet")
-                            else w.text("Чаты с таким названием не найдены", "No matching chat titles"),
+                            if (query.isNotEmpty()) w.text("Чаты с таким названием не найдены", "No matching chat titles")
+                            else if (showArchived) w.text("Архив пуст", "Archive is empty")
+                            else w.text("В аккаунте пока нет чатов", "Your account has no chats yet"),
                             Modifier.padding(16.dp), style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -344,6 +394,14 @@ private fun ChatScreen(ui: ChatUiState, settings: AppSettings, model: SnowSeekVi
                                 canAct = ui.authenticated && !ui.generating && !ui.loading && !ui.uploading,
                                 onEdit = model::editMessage, onContinue = model::continueMessage,
                                 onRegenerate = model::regenerateMessage, onVersion = model::switchVersion,
+                                onShare = { question, answer, citations -> scope.launch {
+                                    try { dev.snowseek.app.data.AnswerImageExporter.share(context, question, answer, citations) }
+                                    catch (_: Exception) {
+                                        android.widget.Toast.makeText(context,
+                                            w.text("Не удалось подготовить изображение ответа", "Could not prepare the reply image"),
+                                            android.widget.Toast.LENGTH_LONG).show()
+                                    }
+                                } },
                                 canSwitchVersion = ui.editingMessageId == null,
                                 jumpToRequest = jumpToRequest, onJumpHandled = { jumpToRequest = null }) }
                         }
@@ -422,11 +480,15 @@ private fun ChatScreen(ui: ChatUiState, settings: AppSettings, model: SnowSeekVi
             TextButton(onClick = { renameId = null }, enabled = !ui.loading) { Text(w.text("Отмена", "Cancel")) }
         },
     )
-    if (deleteId != null) AlertDialog(onDismissRequest = { deleteId = null },
-        title = { Text(w.text("Удалить диалог?", "Delete this conversation?")) },
-        text = { Text(w.text("Диалог будет удалён из аккаунта. Отменить это действие нельзя.", "This conversation will be deleted from your account. This cannot be undone.")) },
-        confirmButton = { TextButton(onClick = { deleteId?.let(model::deleteChat); deleteId = null }) { Text(w.text("Удалить", "Delete")) } },
-        dismissButton = { TextButton(onClick = { deleteId = null }) { Text(w.text("Отмена", "Cancel")) } })
+    deleteIds?.let { ids -> AlertDialog(onDismissRequest = { if (!ui.loading) deleteIds = null },
+        title = { Text(if (ids.size == 1) w.text("Удалить диалог?", "Delete this conversation?")
+            else w.text("Удалить выбранные чаты?", "Delete selected chats?")) },
+        text = { Text(w.text("Выбранные диалоги будут удалены из аккаунта. Отменить это действие нельзя.", "Selected chats will be deleted from your account. This cannot be undone.")) },
+        confirmButton = { TextButton(enabled = !ui.loading, onClick = {
+            model.deleteChats(ids); model.clearChatSelection(); selectionMode = false; deleteIds = null
+        }) { Text(w.text("Удалить", "Delete"), color = MaterialTheme.colorScheme.error) } },
+        dismissButton = { TextButton(onClick = { deleteIds = null }, enabled = !ui.loading) { Text(w.text("Отмена", "Cancel")) } })
+    }
 }
 
 @Composable
@@ -473,6 +535,7 @@ private fun EmptyChat(chatId: String, modifier: Modifier) {
 private fun MessageList(
     chat: ChatSession, animations: Boolean, modifier: Modifier, canAct: Boolean,
     onEdit: (String) -> Unit, onContinue: (String) -> Unit, onRegenerate: (String) -> Unit,
+    onShare: (question: String, answer: String, citations: List<dev.snowseek.core.SearchCitation>) -> Unit,
     onVersion: (String, String) -> Unit, canSwitchVersion: Boolean,
     jumpToRequest: String?, onJumpHandled: () -> Unit,
     composerInset: Dp, hideInstructions: Boolean, attachmentPhotos: Map<String, Uri>, wallpaperEnabled: Boolean,
@@ -548,6 +611,9 @@ private fun MessageList(
             item(key = "conversation-bottom") { Spacer(Modifier.height(1.dp)) }
             items(newestFirst, key = { it.uiKey }) { message ->
                 Column {
+                    val messageIndex = chat.messages.indexOfFirst { it.uiKey == message.uiKey }
+                    val question = if (messageIndex > 0) chat.messages.take(messageIndex)
+                        .lastOrNull { it.role == dev.snowseek.core.MessageRole.USER }?.text.orEmpty() else ""
                     MessageCard(message, onReasoningToggle = { followLatest = false },
                         wallpaperEnabled = wallpaperEnabled,
                         showInstruction = !hideInstructions,
@@ -561,6 +627,9 @@ private fun MessageList(
                         onEdit = if (message.role == dev.snowseek.core.MessageRole.USER) ({ onEdit(message.id) }) else null,
                         onContinue = if (canAct && message.id == lastAssistant?.id && message.continuable &&
                             message.id.toLongOrNull() != null) ({ onContinue(message.id) }) else null,
+                        onShare = if (message.role == dev.snowseek.core.MessageRole.ASSISTANT &&
+                            message.status != dev.snowseek.core.MessageStatus.GENERATING && message.text.isNotBlank())
+                            ({ onShare(question, message.text, message.citations) }) else null,
                         onRegenerate = if (canAct && message.role == dev.snowseek.core.MessageRole.ASSISTANT &&
                             message.regenerable && message.id.toLongOrNull() != null) ({ onRegenerate(message.id) }) else null)
                     chat.versions[message.id]?.let { version ->

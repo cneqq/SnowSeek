@@ -16,6 +16,7 @@ import dev.snowseek.app.auth.WebSession
 import dev.snowseek.app.auth.DeepSeekCredentials
 import dev.snowseek.app.data.DeepSeekHttpTransport
 import dev.snowseek.app.data.PhotoCache
+import dev.snowseek.app.data.ChatPersonalizationStore
 import dev.snowseek.app.data.WallpaperStore
 import dev.snowseek.app.settings.WallpaperKind
 import dev.snowseek.app.settings.WallpaperSettings
@@ -49,6 +50,8 @@ data class ChatUiState(
     val authenticated: Boolean = false,
     val sessionChanging: Boolean = false,
     val chats: List<ChatSession> = emptyList(),
+    val archivedChatIds: Set<String> = emptySet(),
+    val selectedChatIds: Set<String> = emptySet(),
     val selectedId: String? = null,
     val input: String = "",
     val editingMessageId: String? = null,
@@ -71,12 +74,16 @@ data class ChatUiState(
 class SnowSeekViewModel(application: Application) : AndroidViewModel(application) {
     private val preferences = SettingsStore(application)
     private val credentials = DeepSeekCredentials.get(application)
+    private val chatPersonalization = ChatPersonalizationStore(application)
     private val wallpapers = WallpaperStore(application)
     internal val photoCache = PhotoCache(File(application.cacheDir, "attachment-photos")) { credentials.changes.value }
     private val transport = DeepSeekHttpTransport(application)
     private val web = DeepSeekWebProvider(transport, preferences)
     private val provider: ChatProvider = web
-    private val mutableUi = MutableStateFlow(ChatUiState(authenticated = credentials.token() != null))
+    private val mutableUi = MutableStateFlow(ChatUiState(
+        authenticated = credentials.token() != null,
+        input = chatPersonalization.draft(credentials.token(), NEW_CHAT_DRAFT),
+    ))
     val ui = mutableUi.asStateFlow()
     private val mutableSettingsReady = MutableStateFlow(false)
     val settingsReady = mutableSettingsReady.asStateFlow()
@@ -101,6 +108,7 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
     private var inputBeforeEdit = ""
     private var attachmentsBeforeEdit = emptyList<ChatAttachment>()
     private var upload: Job? = null
+    private var draftSave: Job? = null
     private var wallpaperImport: Job? = null
     private var activeChatId: String? = null
     private var initialization: Job? = null
@@ -112,6 +120,7 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
 
     init {
         var observedRevision = credentials.changes.value
+        mutableUi.update { it.copy(archivedChatIds = chatPersonalization.archived(credentials.token())) }
         bindProvider()
         initialize()
         viewModelScope.launch {
@@ -136,7 +145,9 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
                 observedRevision = credentials.changes.value
                 mutableUi.value = ChatUiState(authenticated = credentials.token() != null,
                     sessionChanging = loggingOut, signingOut = loggingOut,
-                    deepThink = lastSettings.deepThink, search = lastSettings.search)
+                    deepThink = lastSettings.deepThink, search = lastSettings.search,
+                    archivedChatIds = chatPersonalization.archived(credentials.token()),
+                    input = chatPersonalization.draft(credentials.token(), NEW_CHAT_DRAFT))
                 bindProvider()
                 if (!loggingOut) initialize()
             }
@@ -205,7 +216,20 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun input(value: String) { mutableUi.update { it.copy(input = value.take(32_768)) } }
+    fun input(value: String) {
+        val current = ui.value
+        val next = value.take(32_768)
+        mutableUi.update { it.copy(input = next) }
+        if (current.editingMessageId == null) {
+            val token = credentials.token()
+            val key = current.selectedId ?: NEW_CHAT_DRAFT
+            draftSave?.cancel()
+            draftSave = viewModelScope.launch {
+                delay(300)
+                chatPersonalization.saveDraft(token, key, next)
+            }
+        }
+    }
     fun attachFiles(uris: List<Uri>, fromPhotoPicker: Boolean = false) {
         val current = ui.value
         if (!current.authenticated || current.signingOut || current.generating || current.loading || current.uploading) return
@@ -317,7 +341,12 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
     }
     fun select(id: String) {
         if (!ui.value.authenticated || ui.value.signingOut || ui.value.uploading || !ui.value.initialized) return
-        mutableUi.update { it.copy(selectedId = id, input = "", editingMessageId = null, attachments = emptyList(), selectedInstruction = null) }
+        val current = ui.value
+        if (current.editingMessageId == null) {
+            draftSave?.cancel()
+            chatPersonalization.saveDraft(credentials.token(), current.selectedId ?: NEW_CHAT_DRAFT, current.input)
+        }
+        mutableUi.update { it.copy(selectedId = id, input = chatPersonalization.draft(credentials.token(), id), editingMessageId = null, attachments = emptyList(), selectedInstruction = null) }
         loadHistory(id)
     }
     fun refreshHistory() {
@@ -342,23 +371,71 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
 
     fun newChat() {
         if (!ui.value.authenticated || ui.value.signingOut || ui.value.generating || ui.value.loading || ui.value.uploading || !ui.value.initialized) return
-        mutableUi.update { it.copy(selectedId = null, input = "", selectedInstruction = null, editingMessageId = null, attachments = emptyList()) }
+        val current = ui.value
+        if (current.editingMessageId == null) {
+            draftSave?.cancel()
+            chatPersonalization.saveDraft(credentials.token(), current.selectedId ?: NEW_CHAT_DRAFT, current.input)
+        }
+        mutableUi.update { it.copy(selectedId = null, input = chatPersonalization.draft(credentials.token(), NEW_CHAT_DRAFT), selectedInstruction = null, editingMessageId = null, attachments = emptyList()) }
     }
 
     fun deleteChat(id: String) {
-        if (!ui.value.authenticated || ui.value.signingOut || ui.value.generating || ui.value.loading || ui.value.uploading) return
+        deleteChats(setOf(id))
+    }
+
+    fun toggleChatSelection(id: String) {
+        if (ui.value.chats.none { it.id == id }) return
+        mutableUi.update { state -> state.copy(selectedChatIds = if (id in state.selectedChatIds)
+            state.selectedChatIds - id else state.selectedChatIds + id) }
+    }
+
+    fun clearChatSelection() { mutableUi.update { it.copy(selectedChatIds = emptySet()) } }
+
+    fun archiveChats(ids: Set<String>, archived: Boolean) {
+        val current = ui.value
+        if (!current.authenticated || current.signingOut || current.generating || current.loading || current.uploading) return
+        val validIds = ids intersect current.chats.mapTo(mutableSetOf()) { it.id }
+        if (validIds.isEmpty()) return
+        chatPersonalization.setArchived(credentials.token(), validIds, archived)
+        mutableUi.update { state -> state.copy(
+            archivedChatIds = if (archived) state.archivedChatIds + validIds else state.archivedChatIds - validIds,
+            selectedChatIds = state.selectedChatIds - validIds,
+        ) }
+    }
+
+    fun deleteChats(ids: Set<String>) {
+        val current = ui.value
+        if (!current.authenticated || current.signingOut || current.generating || current.loading || current.uploading) return
+        val validIds = ids intersect current.chats.mapTo(mutableSetOf()) { it.id }
+        if (validIds.isEmpty()) return
+        val accountToken = credentials.token()
         mutableUi.update { it.copy(loading = true) }
         accountMutation = viewModelScope.launch {
+            val deleted = mutableSetOf<String>()
             try {
-                provider.deleteChat(id)
-                mutableUi.update {
-                    if (it.selectedId == id) it.copy(selectedId = provider.chats.value.firstOrNull()?.id,
-                        editingMessageId = null, input = "", attachments = emptyList()) else it
-                }
-                if (provider === web) ui.value.selectedId?.let { provider.getMessages(it) }
+                provider.deleteChats(validIds)
+                deleted += validIds
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) { report(failure) }
-            finally { mutableUi.update { it.copy(loading = false) } }
+            finally {
+                if (deleted.isNotEmpty()) {
+                    chatPersonalization.removeChats(accountToken, deleted)
+                    val selectedWasDeleted = ui.value.selectedId in deleted
+                    val nextId = provider.chats.value.firstOrNull { it.id !in ui.value.archivedChatIds }?.id
+                    mutableUi.update { state -> state.copy(
+                        selectedChatIds = state.selectedChatIds - deleted,
+                        archivedChatIds = state.archivedChatIds - deleted,
+                        selectedId = if (selectedWasDeleted) nextId else state.selectedId,
+                        input = if (selectedWasDeleted) nextId?.let { chatPersonalization.draft(accountToken, it) }.orEmpty() else state.input,
+                        editingMessageId = if (selectedWasDeleted) null else state.editingMessageId,
+                        attachments = if (selectedWasDeleted) emptyList() else state.attachments,
+                    ) }
+                    if (selectedWasDeleted && nextId != null) {
+                        try { provider.getMessages(nextId) } catch (failure: Exception) { report(failure) }
+                    }
+                }
+                mutableUi.update { it.copy(loading = false) }
+            }
         }
     }
 
@@ -394,6 +471,10 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
         val prompt = current.input.trim()
         if (!current.authenticated || current.signingOut || current.generating || current.loading || current.uploading || !current.initialized ||
             (prompt.isEmpty() && current.attachments.isEmpty())) return
+        if (current.editingMessageId == null) {
+            draftSave?.cancel()
+            chatPersonalization.saveDraft(credentials.token(), current.selectedId ?: NEW_CHAT_DRAFT, "")
+        }
         mutableUi.update { it.copy(generating = true, input = if (current.editingMessageId == null) "" else prompt,
             attachments = if (current.editingMessageId == null) emptyList() else current.attachments, error = false) }
         generation = viewModelScope.launch {
@@ -558,5 +639,14 @@ class SnowSeekViewModel(application: Application) : AndroidViewModel(application
             }
         }
     }
-    override fun onCleared() { transport.cancelCompletion() }
+    private companion object { const val NEW_CHAT_DRAFT = "__new_chat__" }
+
+    override fun onCleared() {
+        draftSave?.cancel()
+        val current = ui.value
+        if (current.editingMessageId == null) {
+            chatPersonalization.saveDraft(credentials.token(), current.selectedId ?: NEW_CHAT_DRAFT, current.input)
+        }
+        transport.cancelCompletion()
+    }
 }

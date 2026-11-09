@@ -100,6 +100,9 @@ interface ChatProvider {
     suspend fun getChats(): List<ChatSession>
     suspend fun createChat(): ChatSession
     suspend fun deleteChat(chatId: String)
+    suspend fun deleteChats(chatIds: Set<String>) {
+        chatIds.forEach { deleteChat(it) }
+    }
     suspend fun getMessages(chatId: String): List<ChatMessage>
     fun sendMessage(chatId: String, prompt: String, options: ChatOptions = ChatOptions()): Flow<ChatMessage>
     fun editMessage(chatId: String, messageId: String, prompt: String, options: ChatOptions = ChatOptions()): Flow<ChatMessage> =

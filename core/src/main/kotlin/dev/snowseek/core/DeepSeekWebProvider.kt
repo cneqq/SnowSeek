@@ -114,12 +114,16 @@ class DeepSeekWebProvider(
         state.update { chats -> chats.map { if (it.id == chatId) it.copy(title = savedTitle) else it } }
     }
 
-    override suspend fun deleteChat(chatId: String) {
-        if (active?.chatId == chatId) throw DeepSeekFailure("Сначала остановите генерацию / Stop generation first")
-        api().request("/api/v0/chat_session/delete", buildJsonObject { putJsonArray("chat_session_ids") { add(chatId) } })
-        state.update { it.filterNot { chat -> chat.id == chatId } }
-        parents.remove(chatId)
-        branches.remove(chatId)
+    override suspend fun deleteChat(chatId: String) = deleteChats(setOf(chatId))
+
+    override suspend fun deleteChats(chatIds: Set<String>) {
+        if (chatIds.isEmpty()) return
+        if (active?.chatId?.let(chatIds::contains) == true) throw DeepSeekFailure("Сначала остановите генерацию / Stop generation first")
+        api().request("/api/v0/chat_session/delete", buildJsonObject {
+            putJsonArray("chat_session_ids") { chatIds.forEach { id -> add(id) } }
+        })
+        state.update { chats -> chats.filterNot { chat -> chat.id in chatIds } }
+        chatIds.forEach { id -> parents.remove(id); branches.remove(id) }
     }
     override suspend fun getMessages(chatId: String): List<ChatMessage> {
         api()

@@ -18,6 +18,7 @@ import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.rounded.ContentCopy
@@ -53,6 +54,7 @@ fun MessageCard(
     onEdit: (() -> Unit)? = null,
     onContinue: (() -> Unit)? = null,
     onRegenerate: (() -> Unit)? = null,
+    onShare: (() -> Unit)? = null,
     animateStreaming: Boolean = false,
     onReveal: () -> Unit = {},
     showInstruction: Boolean = true,
@@ -152,6 +154,12 @@ fun MessageCard(
                     Row(verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         CopyButton(message.text, w.text("Копировать ответ", "Copy reply"), replyAction = true)
+                        if (onShare != null) ReplyActionButton(
+                            onClick = onShare,
+                            icon = Icons.Outlined.Share,
+                            description = w.text("Поделиться картинкой", "Share as image"),
+                            enabled = message.text.isNotBlank(),
+                        )
                         if (onRegenerate != null) ReplyActionButton(
                             onClick = onRegenerate,
                             icon = Icons.Rounded.Refresh,
