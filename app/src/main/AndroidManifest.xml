@@ -1,10 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <queries>
         <intent>
             <action android:name="android.intent.action.VIEW" />
@@ -17,8 +14,6 @@
         android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher"
         android:label="SnowSeek" android:supportsRtl="true"
         android:usesCleartextTraffic="false" android:theme="@style/Theme.SnowSeek">
-        <service android:name="androidx.work.impl.foreground.SystemForegroundService"
-            android:foregroundServiceType="dataSync" tools:node="merge" />
         <activity android:name=".auth.OfficialWebActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <activity android:name=".auth.GoogleSignInActivity" android:exported="true"
             android:launchMode="singleTop" android:excludeFromRecents="true" android:windowSoftInputMode="adjustResize">

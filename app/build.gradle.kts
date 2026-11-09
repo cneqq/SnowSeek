@@ -6,7 +6,6 @@ plugins {
 
 android {
     namespace = "dev.snowseek.app"
-    ndkVersion = "29.0.14206865"
     compileSdk {
         version = release(37) { minorApiLevel = 0 }
     }
@@ -15,8 +14,8 @@ android {
         applicationId = "dev.snowseek.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 31
-        versionName = "0.6.6"
+        versionCode = 32
+        versionName = "0.6.7"
         ndk {
             abiFilters += "arm64-v8a"
         }
@@ -36,13 +35,6 @@ android {
         release {
             isMinifyEnabled = false
             isShrinkResources = false
-        }
-    }
-
-    externalNativeBuild {
-        cmake {
-            path = file("src/main/cpp/CMakeLists.txt")
-            version = "3.31.6"
         }
     }
 
@@ -72,9 +64,7 @@ dependencies {
     implementation("dev.chrisbanes.haze:haze-blur:2.1.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
-    implementation("androidx.work:work-runtime-ktx:2.11.2")
     implementation("androidx.datastore:datastore-preferences:1.3.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.12.0")
-    implementation("com.google.ai.edge.litertlm:litertlm-android:0.17.1")
 }

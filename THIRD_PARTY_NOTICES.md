@@ -14,8 +14,6 @@
 | Inter | OFL-1.1 | https://github.com/google/fonts/tree/86aced91de05cd4f96a06838124cca45be337b2b/ofl/inter |
 | Source Serif 4 | OFL-1.1 | https://github.com/google/fonts/tree/86aced91de05cd4f96a06838124cca45be337b2b/ofl/sourceserif4 |
 | Haze / Haze Glass 2.1.0, Chris Banes | Apache-2.0 | https://github.com/chrisbanes/haze/tree/2.1.0 |
-| LiteRT-LM Android 0.17.1, Google AI Edge | Apache-2.0 | https://github.com/google-ai-edge/LiteRT-LM/tree/v0.17.1 |
-| llama.cpp (pinned commit `7d7f0287530bc8981690f361d8c1627dbae1c99a`), ggml-org | MIT | https://github.com/ggml-org/llama.cpp/tree/7d7f0287530bc8981690f361d8c1627dbae1c99a |
 | Gradle Wrapper | Apache-2.0 | https://github.com/gradle/gradle |
 
 Apache-2.0 совместима с распространением объединённой работы под GPLv3 согласно GNU: https://www.gnu.org/licenses/license-list.html#apache2. Android SDK/JDK являются инструментами сборки и не распространяются в репозитории.
@@ -24,9 +22,4 @@ Markdown разбирается средствами SnowSeek. Формулы La
 
 Лицензии Noto Sans, Inter и Source Serif 4 хранятся в каталоге app/src/main/assets/licenses и доступны на экране лицензий приложения.
 
-Лицензионные тексты Apache-2.0, GPLv3 и MIT (llama.cpp) находятся в `licenses/Apache-2.0.txt`, `LICENSE` и `licenses/llama.cpp-MIT.txt`. Сведения об авторах компонентов сохраняются в их исходных репозиториях и Maven metadata. Для поставки релиза проверяйте конкретные разрешённые версии и их NOTICE-файлы.
-
-Модели загружаются отдельно по запросу пользователя и не включены в APK. В каталоге указаны издатель, базовая модель и лицензия для каждого файла:
-
-- LiteRT-LM Qwen3-0.6B INT4, конверсия LiteRT Community, Apache-2.0: https://huggingface.co/litert-community/Qwen3-0.6B-int4
-- GGUF Qwen3-0.6B Q4_0, публикация ggml-org; базовая модель Alibaba Qwen3, Apache-2.0: https://huggingface.co/ggml-org/Qwen3-0.6B-GGUF
+Лицензионные тексты Apache-2.0 и GPLv3 находятся в `licenses/Apache-2.0.txt` и `LICENSE`. Сведения об авторах компонентов сохраняются в их исходных репозиториях и Maven metadata. Для поставки релиза проверяйте конкретные разрешённые версии и их NOTICE-файлы.
