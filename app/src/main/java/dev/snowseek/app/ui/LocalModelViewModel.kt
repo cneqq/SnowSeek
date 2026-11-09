@@ -186,6 +186,9 @@ internal class LocalModelViewModel(application: Application) : AndroidViewModel(
                     val now = System.currentTimeMillis()
                     if (now - lastSavedAt >= 1_000L) { saveCurrentChat(); lastSavedAt = now }
                 }
+                if (state.value.exchanges.lastOrNull()?.answer.isNullOrBlank()) {
+                    error("Модель завершила ответ без текста. Проверьте совместимость файла и шаблона диалога.")
+                }
                 saveCurrentChat()
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -206,7 +209,7 @@ internal class LocalModelViewModel(application: Application) : AndroidViewModel(
 
     private suspend fun engineFor(model: InstalledModel): LocalInferenceEngine {
         if (engineModelId == model.id) return checkNotNull(engine)
-        unload()
+        closeEngine()
         mutableState.update { it.copy(loading = true) }
         return try {
             val next: LocalInferenceEngine = when (model.format) {
@@ -243,11 +246,15 @@ internal class LocalModelViewModel(application: Application) : AndroidViewModel(
     private fun unload() {
         inferenceJob?.cancel()
         inferenceJob = null
+        closeEngine()
+        mutableState.update { it.copy(loading = false, generating = false) }
+    }
+
+    private fun closeEngine() {
         runCatching { engine?.cancel() }
         runCatching { engine?.close() }
         engine = null
         engineModelId = null
-        mutableState.update { it.copy(loading = false, generating = false) }
     }
 
     override fun onCleared() {
