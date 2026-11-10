@@ -569,12 +569,11 @@ private fun MessageList(
     val shouldFollowLatest by rememberUpdatedState(followLatest && latestTextVisible && !dragged)
     LaunchedEffect(dragged) {
         if (dragged) followLatest = false
-        else if (latestTextVisible) followLatest = true
     }
-    LaunchedEffect(latestTextVisible, hasVisibleItems, dragged) {
+    LaunchedEffect(atBottom, latestTextVisible, hasVisibleItems, dragged) {
         if (hasVisibleItems && !dragged) {
-            if (latestTextVisible) followLatest = true
-            else if (!atBottom) followLatest = false
+            if (atBottom) followLatest = true
+            else if (!latestTextVisible) followLatest = false
         }
     }
     LaunchedEffect(chat.id) {
