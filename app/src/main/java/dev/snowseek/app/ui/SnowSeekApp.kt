@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -38,6 +39,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
@@ -45,6 +47,8 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalContext
@@ -541,7 +545,13 @@ private fun MessageList(
     // With reverseLayout, the first item stays anchored at the bottom while the newest reply grows.
     val listState = rememberLazyListState()
     val newestFirst = remember(chat.messages) { chat.messages.asReversed() }
+    val last = chat.messages.lastOrNull()
     val lastAssistant = chat.messages.lastOrNull { it.role == dev.snowseek.core.MessageRole.ASSISTANT }
+    val dragged by listState.interactionSource.collectIsDraggedAsState()
+    val density = LocalDensity.current
+    val viewportTopInset = with(density) { 16.dp.toPx() }
+    val viewportBottomInset = with(density) { (16.dp + composerInset).toPx() }
+    var textViewport by remember(listState) { mutableStateOf(Rect.Zero) }
     val atBottom by remember(listState) {
         derivedStateOf {
             listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
@@ -559,7 +569,16 @@ private fun MessageList(
         onJumpHandled()
     }
     Box(modifier.fillMaxWidth()) {
-        LazyColumn(state = listState, reverseLayout = true, modifier = Modifier.fillMaxSize(),
+        LazyColumn(state = listState, reverseLayout = true,
+            modifier = Modifier.fillMaxSize().onGloballyPositioned { coordinates ->
+                val origin = coordinates.positionInRoot()
+                textViewport = Rect(
+                    left = origin.x,
+                    top = origin.y + viewportTopInset,
+                    right = origin.x + coordinates.size.width,
+                    bottom = origin.y + coordinates.size.height - viewportBottomInset,
+                )
+            },
             contentPadding = PaddingValues(start = 18.dp, top = 16.dp, end = 18.dp, bottom = 16.dp + composerInset),
             verticalArrangement = Arrangement.spacedBy(22.dp)) {
             item(key = "conversation-bottom") { Spacer(Modifier.height(1.dp)) }
@@ -573,6 +592,10 @@ private fun MessageList(
                         showInstruction = !hideInstructions,
                         attachmentPhotos = attachmentPhotos,
                         animateStreaming = animations,
+                        streamTailViewport = textViewport,
+                        followStreamTail = message.role == dev.snowseek.core.MessageRole.ASSISTANT &&
+                            message.uiKey == last?.uiKey,
+                        userDragging = dragged,
                         onEdit = if (message.role == dev.snowseek.core.MessageRole.USER) ({ onEdit(message.id) }) else null,
                         onContinue = if (canAct && message.id == lastAssistant?.id && message.continuable &&
                             message.id.toLongOrNull() != null) ({ onContinue(message.id) }) else null,
