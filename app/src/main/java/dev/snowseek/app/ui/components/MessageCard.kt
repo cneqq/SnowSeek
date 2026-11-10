@@ -50,13 +50,11 @@ import kotlinx.coroutines.flow.first
 @Composable
 fun MessageCard(
     message: ChatMessage,
-    onReasoningToggle: () -> Unit = {},
     onEdit: (() -> Unit)? = null,
     onContinue: (() -> Unit)? = null,
     onRegenerate: (() -> Unit)? = null,
     onShare: (() -> Unit)? = null,
     animateStreaming: Boolean = false,
-    onReveal: () -> Unit = {},
     showInstruction: Boolean = true,
     attachmentPhotos: Map<String, Uri> = emptyMap(),
     wallpaperEnabled: Boolean = false,
@@ -112,10 +110,6 @@ fun MessageCard(
             val text = revealStream(message.uiKey, message.text, generating, reveal)
             val reasoning = revealStream(message.uiKey, message.reasoning, generating, reveal)
             val revealing = text != message.text || reasoning != message.reasoning
-            val revealCallback by rememberUpdatedState(onReveal)
-            LaunchedEffect(text, reasoning) {
-                if (reveal && (generating || revealing)) revealCallback()
-            }
             if (reasoning.isNotEmpty()) {
                 var expanded by rememberSaveable(message.uiKey) {
                     mutableStateOf(message.status == MessageStatus.GENERATING)
@@ -124,7 +118,6 @@ fun MessageCard(
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .6f), modifier = Modifier.fillMaxWidth()) {
                     Column {
                         Row(modifier = Modifier.fillMaxWidth().clickable {
-                            onReasoningToggle()
                             expanded = !expanded
                         }.padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Icon(Icons.Outlined.Psychology, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)

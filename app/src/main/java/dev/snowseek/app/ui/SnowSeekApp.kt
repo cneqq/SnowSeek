@@ -20,7 +20,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -83,8 +82,6 @@ import dev.snowseek.app.ui.theme.SnowSeekTheme
 import dev.snowseek.app.ui.theme.fontFamily
 import dev.snowseek.core.ChatSession
 import dev.chrisbanes.haze.HazeState
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.delay
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.coroutines.launch
@@ -541,67 +538,25 @@ private fun MessageList(
     composerInset: Dp, hideInstructions: Boolean, attachmentPhotos: Map<String, Uri>, wallpaperEnabled: Boolean,
 ) {
     val words = LocalWords.current
-    // Index 0 is always the end of the conversation, independent of measured reply heights.
+    // With reverseLayout, the first item stays anchored at the bottom while the newest reply grows.
     val listState = rememberLazyListState()
     val newestFirst = remember(chat.messages) { chat.messages.asReversed() }
-    val last = chat.messages.lastOrNull()
     val lastAssistant = chat.messages.lastOrNull { it.role == dev.snowseek.core.MessageRole.ASSISTANT }
-    val scrollRequests = remember { Channel<Unit>(Channel.CONFLATED) }
-    val dragged by listState.interactionSource.collectIsDraggedAsState()
-    var followLatest by remember(chat.id) { mutableStateOf(true) }
-    val latestTextVisible by remember(listState, last?.uiKey) {
+    val atBottom by remember(listState) {
         derivedStateOf {
-            val latestKey = last?.uiKey
-            val layout = listState.layoutInfo
-            val latestItem = latestKey?.let { key ->
-                layout.visibleItemsInfo.firstOrNull { it.key == key }
-            }
-            val itemBottom = latestItem?.let { it.offset + it.size }
-            itemBottom != null && itemBottom in layout.viewportStartOffset..layout.viewportEndOffset
-        }
-    }
-    val hasVisibleItems by remember(listState) {
-        derivedStateOf { listState.layoutInfo.visibleItemsInfo.isNotEmpty() }
-    }
-    val atBottom by remember { derivedStateOf {
-        !listState.canScrollBackward
-    } }
-    val shouldFollowLatest by rememberUpdatedState(followLatest && latestTextVisible && !dragged)
-    LaunchedEffect(dragged) {
-        if (dragged) followLatest = false
-    }
-    LaunchedEffect(atBottom, latestTextVisible, hasVisibleItems, dragged) {
-        if (hasVisibleItems && !dragged) {
-            if (atBottom) followLatest = true
-            else if (!latestTextVisible) followLatest = false
+            listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
         }
     }
     LaunchedEffect(chat.id) {
-        followLatest = true
         listState.scrollToItem(0)
     }
     LaunchedEffect(jumpToRequest) {
         if (jumpToRequest == null) return@LaunchedEffect
         val index = chat.messages.indexOfFirst { it.id == jumpToRequest }
         if (index >= 0) {
-            followLatest = false
             listState.scrollToItem(chat.messages.size - index)
         }
         onJumpHandled()
-    }
-    LaunchedEffect(listState, scrollRequests) {
-        for (ignored in scrollRequests) {
-            delay(48)
-            if (shouldFollowLatest) {
-                listState.animateScrollToItem(0)
-            }
-        }
-    }
-    LaunchedEffect(last?.uiKey, last?.text?.length, last?.reasoning?.length, last?.status,
-        followLatest, latestTextVisible, dragged) {
-        if (followLatest && latestTextVisible && !dragged && chat.messages.isNotEmpty()) {
-            scrollRequests.trySend(Unit)
-        }
     }
     Box(modifier.fillMaxWidth()) {
         LazyColumn(state = listState, reverseLayout = true, modifier = Modifier.fillMaxSize(),
@@ -613,16 +568,11 @@ private fun MessageList(
                     val messageIndex = chat.messages.indexOfFirst { it.uiKey == message.uiKey }
                     val question = if (messageIndex > 0) chat.messages.take(messageIndex)
                         .lastOrNull { it.role == dev.snowseek.core.MessageRole.USER }?.text.orEmpty() else ""
-                    MessageCard(message, onReasoningToggle = { followLatest = false },
+                    MessageCard(message,
                         wallpaperEnabled = wallpaperEnabled,
                         showInstruction = !hideInstructions,
                         attachmentPhotos = attachmentPhotos,
                         animateStreaming = animations,
-                        onReveal = {
-                            if (message.id == last?.id && followLatest && latestTextVisible && !dragged) {
-                                scrollRequests.trySend(Unit)
-                            }
-                        },
                         onEdit = if (message.role == dev.snowseek.core.MessageRole.USER) ({ onEdit(message.id) }) else null,
                         onContinue = if (canAct && message.id == lastAssistant?.id && message.continuable &&
                             message.id.toLongOrNull() != null) ({ onContinue(message.id) }) else null,
@@ -636,7 +586,6 @@ private fun MessageList(
                             fun changeVersion(index: Int) {
                                 val target = version.ids.getOrNull(index) ?: return
                                 val position = chat.messages.indexOfFirst { it.id == message.id }
-                                followLatest = false
                                 onVersion(message.id, target)
                                 if (position >= 0) listState.requestScrollToItem(chat.messages.size - position)
                             }
@@ -658,11 +607,7 @@ private fun MessageList(
             val scope = rememberCoroutineScope()
             val w = LocalWords.current
             SmallFloatingActionButton(onClick = {
-                scope.launch {
-                    followLatest = false
-                    listState.animateScrollToItem(0)
-                    followLatest = true
-                }
+                scope.launch { listState.animateScrollToItem(0) }
             },
                 modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = composerInset).padding(12.dp),
                 containerColor = MaterialTheme.colorScheme.primaryContainer) {
