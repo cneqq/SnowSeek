@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -38,6 +39,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
@@ -46,6 +48,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalContext
@@ -540,26 +543,50 @@ private fun MessageList(
 ) {
     val words = LocalWords.current
     val listState = rememberLazyListState()
+    val last = chat.messages.lastOrNull()
     val lastAssistant = chat.messages.lastOrNull { it.role == dev.snowseek.core.MessageRole.ASSISTANT }
+    val dragged by listState.interactionSource.collectIsDraggedAsState()
+    val density = LocalDensity.current
+    val viewportTopInset = with(density) { 16.dp.toPx() }
+    val viewportBottomInset = with(density) { (16.dp + composerInset).toPx() }
+    var textViewport by remember(listState) { mutableStateOf(Rect.Zero) }
+    var followLatest by remember(chat.id) { mutableStateOf(true) }
+    val scope = rememberCoroutineScope()
     val atBottom by remember(listState) {
         derivedStateOf {
-            listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index == listState.layoutInfo.totalItemsCount - 1
+            !listState.canScrollForward
         }
     }
     LaunchedEffect(chat.id, chat.messages.size) {
-        listState.scrollToItem(chat.messages.size)
+        if (chat.messages.lastOrNull()?.role == dev.snowseek.core.MessageRole.USER) {
+            followLatest = true
+        }
+        if (followLatest) listState.scrollToItem(chat.messages.size)
+    }
+    LaunchedEffect(dragged, atBottom) {
+        if (dragged && !atBottom) followLatest = false
+        else if (!dragged && atBottom) followLatest = true
     }
     LaunchedEffect(jumpToRequest) {
         if (jumpToRequest == null) return@LaunchedEffect
         val index = chat.messages.indexOfFirst { it.id == jumpToRequest }
         if (index >= 0) {
+            followLatest = false
             listState.scrollToItem(index)
         }
         onJumpHandled()
     }
     Box(modifier.fillMaxWidth()) {
         LazyColumn(state = listState,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().onGloballyPositioned { coordinates ->
+                val origin = coordinates.positionInRoot()
+                textViewport = Rect(
+                    left = origin.x,
+                    top = origin.y + viewportTopInset,
+                    right = origin.x + coordinates.size.width,
+                    bottom = origin.y + coordinates.size.height - viewportBottomInset,
+                )
+            },
             contentPadding = PaddingValues(start = 18.dp, top = 16.dp, end = 18.dp, bottom = 16.dp + composerInset),
             verticalArrangement = Arrangement.spacedBy(22.dp)) {
             items(chat.messages, key = { it.uiKey }) { message ->
@@ -572,6 +599,15 @@ private fun MessageList(
                         showInstruction = !hideInstructions,
                         attachmentPhotos = attachmentPhotos,
                         animateStreaming = animations,
+                        streamTailViewport = textViewport,
+                        followStreamTail = followLatest && message.role == dev.snowseek.core.MessageRole.ASSISTANT &&
+                            message.uiKey == last?.uiKey,
+                        userDragging = dragged,
+                        onFollowStreamTail = {
+                            if (followLatest && !dragged) {
+                                scope.launch { listState.animateScrollToItem(chat.messages.size) }
+                            }
+                        },
                         onEdit = if (message.role == dev.snowseek.core.MessageRole.USER) ({ onEdit(message.id) }) else null,
                         onContinue = if (canAct && message.id == lastAssistant?.id && message.continuable &&
                             message.id.toLongOrNull() != null) ({ onContinue(message.id) }) else null,
@@ -604,9 +640,9 @@ private fun MessageList(
             item(key = "conversation-bottom") { Spacer(Modifier.height(1.dp)) }
         }
         if (!atBottom) {
-            val scope = rememberCoroutineScope()
             val w = LocalWords.current
             SmallFloatingActionButton(onClick = {
+                followLatest = true
                 scope.launch { listState.animateScrollToItem(chat.messages.size) }
             },
                 modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = composerInset).padding(12.dp),

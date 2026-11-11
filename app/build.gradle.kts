@@ -14,8 +14,8 @@ android {
         applicationId = "dev.snowseek.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 36
-        versionName = "0.3.12"
+        versionCode = 37
+        versionName = "0.3.13"
         ndk {
             abiFilters += "arm64-v8a"
         }

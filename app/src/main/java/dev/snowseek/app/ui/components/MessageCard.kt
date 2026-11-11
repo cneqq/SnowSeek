@@ -28,10 +28,14 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -47,6 +51,11 @@ import dev.snowseek.core.MessageStatus
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 
+private class StreamTailTracker {
+    var textLength = 0
+    var visible = false
+}
+
 @Composable
 fun MessageCard(
     message: ChatMessage,
@@ -55,11 +64,18 @@ fun MessageCard(
     onRegenerate: (() -> Unit)? = null,
     onShare: (() -> Unit)? = null,
     animateStreaming: Boolean = false,
+    streamTailViewport: Rect = Rect.Zero,
+    followStreamTail: Boolean = false,
+    userDragging: Boolean = false,
+    onFollowStreamTail: (() -> Unit)? = null,
     showInstruction: Boolean = true,
     attachmentPhotos: Map<String, Uri> = emptyMap(),
     wallpaperEnabled: Boolean = false,
 ) {
     val w = LocalWords.current
+    val density = LocalDensity.current
+    val tailTracker = remember(message.uiKey) { StreamTailTracker() }
+    val tailHeightPx = with(density) { 2.dp.toPx() }
     val user = message.role == MessageRole.USER
     val background = if (wallpaperEnabled && !user) Modifier.clip(RoundedCornerShape(16.dp))
         .background(MaterialTheme.colorScheme.surface.copy(alpha = .94f)).padding(12.dp) else Modifier
@@ -110,6 +126,7 @@ fun MessageCard(
             val text = revealStream(message.uiKey, message.text, generating, reveal)
             val reasoning = revealStream(message.uiKey, message.reasoning, generating, reveal)
             val revealing = text != message.text || reasoning != message.reasoning
+            val followVisibleTail = followStreamTail && (generating || revealing) && text.isNotBlank()
             if (reasoning.isNotEmpty()) {
                 var expanded by rememberSaveable(message.uiKey) {
                     mutableStateOf(message.status == MessageStatus.GENERATING)
@@ -133,7 +150,20 @@ fun MessageCard(
                 Spacer(Modifier.height(12.dp))
             }
             CompositionLocalProvider(LocalSearchCitations provides message.citations) {
-                Box(Modifier.fillMaxWidth()) {
+                Box(Modifier.fillMaxWidth().then(if (followVisibleTail) Modifier.onGloballyPositioned { coordinates ->
+                    val viewport = streamTailViewport
+                    val bounds = coordinates.boundsInRoot()
+                    val tailTop = (bounds.bottom - tailHeightPx).coerceAtLeast(bounds.top)
+                    val tailVisible = viewport.bottom > viewport.top &&
+                        tailTop < viewport.bottom && bounds.bottom > viewport.top
+                    val textGrew = text.length > tailTracker.textLength
+                    if (textGrew && tailTracker.visible && !tailVisible &&
+                        bounds.bottom > viewport.bottom && !userDragging) {
+                        onFollowStreamTail?.invoke()
+                    }
+                    tailTracker.textLength = text.length
+                    tailTracker.visible = tailVisible
+                } else Modifier)) {
                     MarkdownText(text)
                 }
             }
